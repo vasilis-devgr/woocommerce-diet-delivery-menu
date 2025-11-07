@@ -1,0 +1,1593 @@
+<?php
+
+// Αποτροπή άμεσης πρόσβασης
+if (! defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Κλάση χειρισμού AJAX αιτημάτων για το σύστημα μενού
+ * 
+ * Χειρίζεται όλες τις AJAX κλήσεις από το frontend:
+ * - Έλεγχος ταχυδρομικών κωδικών
+ * - Φόρτωση προϊόντων ανά τύπο μενού
+ * - Προσθήκη προϊόντων στο καλάθι
+ * - Διαχείριση τιμών και μεταδεδομένων
+ */
+class WOOPMAjax_Handler
+{
+    /**
+     * Process allergen values from form to display text
+     */
+    private function process_allergens($current_allergens, $current_allergens_other = '') {
+        $allergen_mapping = [
+            'nuts' => 'Ξηροί καρποί',
+            'fishseafood' => 'Ψάρι / Θαλασσινά',
+            'dairyproducts' => 'Γαλακτοκομικά',
+            'egg' => 'Αυγό',
+            'redmeat' => 'Κόκκινο κρέας',
+            'none' => 'Καμία'
+        ];
+        
+        if ($current_allergens === 'none' || empty($current_allergens)) {
+            return 'Καμία';
+        }
+        
+        $selected_allergens = explode(',', $current_allergens);
+        $allergen_values = [];
+        
+        foreach ($selected_allergens as $allergen) {
+            $allergen = trim($allergen);
+            if ($allergen === 'other' && !empty($current_allergens_other)) {
+                $allergen_values[] = $current_allergens_other;
+            } elseif (isset($allergen_mapping[$allergen])) {
+                $allergen_values[] = $allergen_mapping[$allergen];
+            }
+        }
+        
+        return !empty($allergen_values) ? implode(', ', $allergen_values) : 'Καμία';
+    }
+
+    public function __construct()
+    {
+        add_action('wp_ajax_check_shipping_zipcode', array($this, 'woopm_check_shipping_zipcode'));
+        add_action('wp_ajax_nopriv_check_shipping_zipcode', array($this, 'woopm_check_shipping_zipcode'));
+        add_action('wp_ajax_get_available_menu_by_program', array($this, 'woopm_get_available_menu_by_program'));
+        add_action('wp_ajax_nopriv_get_available_menu_by_program', array($this, 'woopm_get_available_menu_by_program'));
+        add_action('wp_ajax_get_product_by_program_type', array($this, 'woopm_get_product_by_program_type'));
+        add_action('wp_ajax_nopriv_get_product_by_program_type', array($this, 'woopm_get_product_by_program_type'));
+
+        add_action('wp_ajax_add_to_cart_product', array($this, 'woopm_add_to_cart_product'));
+        add_action('wp_ajax_nopriv_add_to_cart_product', array($this, 'woopm_add_to_cart_product'));
+
+        add_action('wp_ajax_add_to_cart_single_product', array($this, 'woopm_add_to_cart_single_product'));
+        add_action('wp_ajax_nopriv_add_to_cart_single_product', array($this, 'woopm_add_to_cart_single_product'));
+
+        add_action('woocommerce_review_order_before_payment', array($this, 'woopm_display_cart_menu_data_on_checkout'));
+        add_action('woocommerce_before_calculate_totals', array($this, 'woopm_modify_cart_item_prices'), 10, 1);
+
+        add_action('woocommerce_cart_updated', array($this, 'woopm_clear_cart_session_if_empty'));
+        add_action('woocommerce_cart_item_price', array($this, 'woopm_apply_custom_price_in_cart'), 10, 3);
+        add_action('woocommerce_before_mini_cart', array($this, 'woopm_apply_custom_price_to_mini_cart'), 10, 0);
+        add_action('woocommerce_checkout_create_order', array($this, 'save_cart_menu_data_to_order'), 20, 2);
+        add_action('woocommerce_after_order_notes', array($this, 'woopm_custom_checkout_fields'));
+        add_action('woocommerce_checkout_update_order_meta', array($this, 'woopm_save_checkout_fields'));
+        add_action('woocommerce_admin_order_data_after_order_details', array($this, 'woopm_display_custom_order_meta_admin'));
+        //add_action('woocommerce_thankyou', array($this,'woopm_show_blue_menu_on_thankyou', 20));
+
+
+
+
+    }
+
+    public function woopm_check_shipping_zipcode()
+    {
+
+        if (! check_ajax_referer('woopm_nonce', 'security', false)) {
+            wp_send_json_error('Invalid nonce provided');
+            exit;
+        }
+
+        $zipcode = isset($_POST['zipcode']) ? sanitize_text_field($_POST['zipcode']) : '';
+
+        $zones = WC_Shipping_Zones::get_zones();
+
+        foreach ($zones as $zone) {
+            $zone_regions = $zone['zone_locations'];
+
+            foreach ($zone_regions as $region) {
+                if (isset($region->code) && $region->type === 'postcode') {
+                    $region_postcodes = explode(',', $region->code);
+
+                    foreach ($region_postcodes as $region_postcode) {
+                        $region_postcode = trim($region_postcode);
+                        if ($zipcode === $region_postcode) {
+                            wp_send_json_success('Zipcode matches the shipping zone.');
+                            exit;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If no match was found
+        wp_send_json_error('No matching shipping zone found for the provided zipcode.');
+        exit;
+    }
+
+    public function woopm_get_available_menu_by_program()
+    {
+        if (! check_ajax_referer('woopm_nonce', 'security', false)) {
+            wp_send_json_error('Invalid nonce provided');
+            exit;
+        }
+        $program = isset($_POST['program']) ? sanitize_text_field($_POST['program']) : '';
+        
+        // Map old taxonomy names to menu types for filtering
+        $menu_type_filter = '';
+        if ($program === 'weekly_menu') {
+            $menu_type_filter = 'weekly';
+        } elseif ($program === 'monthly_menu') {
+            $menu_type_filter = 'monthly';
+        }
+        
+        // Get all program_menu terms
+        $available_menus_args = array(
+            'taxonomy'   => 'program_menu',
+            'orderby'    => 'term_id',
+            'order'      => 'ASC',
+            'hide_empty' => false
+        );
+        $available_menus = get_terms($available_menus_args);
+        
+        ob_start();
+        if (!empty($available_menus)) {
+            foreach ($available_menus as $available_menu) {
+                // Filter by menu type if needed
+                $term_menu_type = get_term_meta($available_menu->term_id, 'menu_type', true);
+                
+                // If no menu type is set, try to detect from name
+                if (!$term_menu_type) {
+                    $name_lower = mb_strtolower($available_menu->name);
+                    if (strpos($name_lower, 'weekly') !== false || strpos($name_lower, 'εβδομαδιαίο') !== false) {
+                        $term_menu_type = 'weekly';
+                    } elseif (strpos($name_lower, 'monthly') !== false || strpos($name_lower, 'μηνιαίο') !== false) {
+                        $term_menu_type = 'monthly';
+                    }
+                }
+                
+                // Skip if menu type doesn't match filter
+                if ($menu_type_filter && $term_menu_type && $term_menu_type !== $menu_type_filter) {
+                    continue;
+                }
+                
+                // Include menu if no filter or no type detected (to avoid hiding menus)
+                echo '<option value="' . $available_menu->term_id . '">' . esc_html($available_menu->name) . '</option>';
+            }
+        }
+        $content = ob_get_clean();
+        wp_send_json_success(array('content' => $content));
+    }
+
+
+
+
+    /**
+     * Ajax: build the accordion for Weekly & Monthly programmes
+     *
+     * – Always shows every weekday (or month-day) that exists.
+     * – Week-day children are sorted Δευτέρα ➜ Κυριακή irrespective
+     *   of accents or letter-case stored in the term names.
+     * – First accordion tab is open by default.
+     */
+    public function woopm_get_product_by_program_type()
+    {
+
+        // ---------------------------------------------------------------------
+        // 1. Security
+        // ---------------------------------------------------------------------
+        if (! check_ajax_referer('woopm_nonce', 'security', false)) {
+            wp_send_json_error('Invalid nonce provided');
+        }
+
+        // ---------------------------------------------------------------------
+        // 2. Arguments from the front end
+        // ---------------------------------------------------------------------
+        $program      = isset($_POST['program'])      ? sanitize_text_field($_POST['program'])   : '';
+        $program_menu = isset($_POST['program_menu']) ? intval($_POST['program_menu'])           : 0;
+        $menu_type    = isset($_POST['menu_type'])    ? sanitize_text_field($_POST['menu_type']) : '';
+        $available_day = isset($_POST['available_day']) ? intval($_POST['available_day']) : -1;
+        
+        error_log("=== woopm_get_product_by_program_type ===");
+        error_log("Program: $program, Menu: $program_menu, Menu Type: $menu_type, Available Day: $available_day");
+
+        // For the new system, we'll use the menu type from term meta
+        // But we need to maintain backwards compatibility with the frontend
+        $menu_term = get_term($program_menu, 'program_menu');
+        if (!$menu_term || is_wp_error($menu_term)) {
+            wp_send_json_error('Invalid menu provided');
+        }
+        
+        $actual_menu_type = get_term_meta($program_menu, 'menu_type', true);
+        
+        error_log("Menu term: {$menu_term->name}, Program: $program, Actual menu type: $actual_menu_type");
+        
+        // Use the actual menu type from term meta, not the frontend program selection
+        $taxonomy_days = 'weekday';
+        if ($actual_menu_type === 'monthly') {
+            $use_weeks = true; // Monthly menus show weeks in accordion
+            error_log("Using monthly structure (with weeks)");
+        } else {
+            $use_weeks = false; // Weekly menus don't show weeks
+            error_log("Using weekly structure (no weeks)");
+        }
+
+        // ---------------------------------------------------------------------
+        // 3. Get the appropriate terms based on menu type
+        // ---------------------------------------------------------------------
+        if ($use_weeks) {
+            // For monthly menus, first get weeks, then days within each week
+            $weeks = get_terms([
+                'taxonomy'   => 'week_no',
+                'hide_empty' => false,
+                'orderby'    => 'name',
+                'order'      => 'ASC',
+            ]);
+            
+            if (is_wp_error($weeks) || empty($weeks)) {
+                wp_send_json_error('No weeks found for this program.');
+            }
+        } else {
+            // For weekly menus, get weekdays directly (no weeks)
+            $menu_days = get_terms([
+                'taxonomy'   => $taxonomy_days,
+                'parent'     => 0,
+                'hide_empty' => false,
+                'orderby'    => 'term_id',
+                'order'      => 'ASC',
+            ]);
+
+            if (is_wp_error($menu_days) || empty($menu_days)) {
+                wp_send_json_error('No days found for this program.');
+            }
+        }
+		
+
+        // ---------------------------------------------------------------------
+        // 4. Optional filter: related_days meta
+        // ---------------------------------------------------------------------
+        $related_days         = get_term_meta($program_menu, 'related_days', true);
+        $respect_related_days = false; // flip to true if you need this filter
+
+        // ---------------------------------------------------------------------
+        // 5. Mark-up output
+        // ---------------------------------------------------------------------
+        ob_start(); ?>
+        <div class="accordion">
+            <?php $index = 1;
+            
+            // Handle monthly menus (with week structure)
+            if ($use_weeks) {
+                foreach ($weeks as $week) :
+                    ?>
+                    <div class="tab-act">
+                        <?php $checked = $index === 1 ? 'checked' : ''; ?>
+                        <input type="checkbox"
+                            id="woopm-acc-<?php echo esc_attr($index); ?>"
+                            name="accordion-woopm-<?php echo esc_attr($index); ?>"
+                            <?php echo $checked; ?>>
+
+                        <label for="woopm-acc-<?php echo esc_attr($index); ?>" class="tab__label">
+                            <?php echo esc_html($week->name); ?>
+                        </label>
+
+                        <div class="tab__content-act">
+                            <?php
+                            // Get weekdays for this week
+                            $weekdays = get_terms([
+                                'taxonomy'   => 'weekday',
+                                'hide_empty' => false,
+                                'orderby'    => 'term_id',
+                                'order'      => 'ASC',
+                            ]);
+                            
+                            if (!is_wp_error($weekdays)) {
+                                // Sort weekdays
+                                $weekday_order = [
+                                    'δευτέρα'   => 1,
+                                    'τρίτη'     => 2,
+                                    'τετάρτη'   => 3,
+                                    'πέμπτη'    => 4,
+                                    'παρασκευή' => 5,
+                                    'σάββατο'   => 6,
+                                    'κυριακή'   => 7,
+                                ];
+                                
+                                usort($weekdays, static function ($a, $b) use ($weekday_order) {
+                                    $na = mb_strtolower(remove_accents($a->name), 'UTF-8');
+                                    $nb = mb_strtolower(remove_accents($b->name), 'UTF-8');
+                                    return ($weekday_order[$na] ?? 99) <=> ($weekday_order[$nb] ?? 99);
+                                });
+                                
+                                foreach ($weekdays as $weekday) :
+                                    // Get meals for this day
+                                    $meals = get_terms([
+                                        'taxonomy'   => 'mealtime',
+                                        'hide_empty' => false,
+                                        'orderby'    => 'term_id',
+                                        'order'      => 'ASC',
+                                    ]);
+                                    
+                                    if (!is_wp_error($meals) && !empty($meals)) :
+                                        echo '<h3 class="act-title">' . esc_html($weekday->name) . '</h3>';
+                                        
+                                        foreach ($meals as $meal) :
+                                            // Get products for this specific combination
+                                            if ($menu_type === 'own') {
+                                                // For "make your own menu", filter products based on program type
+                                                $args = [
+                                                    'post_type'      => 'product',
+                                                    'posts_per_page' => -1,
+                                                    'fields'         => 'ids',
+                                                    'meta_query'     => [
+                                                        'relation' => 'AND',
+                                                    ],
+                                                ];
+                                                
+                                                // Get the actual menu type (monthly or weekly)
+                                                $actual_menu_type = get_term_meta($program_menu, 'menu_type', true);
+                                                
+                                                // For monthly menus, filter by products that have monthly price
+                                                // For weekly menus, filter by products that have weekly price
+                                                if ($actual_menu_type === 'monthly') {
+                                                    $args['meta_query'][] = [
+                                                        'relation' => 'OR',
+                                                        [
+                                                            'key'     => 'μηνιαίο',
+                                                            'value'   => '',
+                                                            'compare' => '!=',
+                                                        ],
+                                                        [
+                                                            'key'     => 'monthly_price',
+                                                            'value'   => '',
+                                                            'compare' => '!=',
+                                                        ],
+                                                    ];
+                                                    
+                                                    // For monthly menus, also filter by week and day taxonomies
+                                                    $args['tax_query'] = [
+                                                        'relation' => 'AND',
+                                                        [
+                                                            'taxonomy' => 'week_no',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => isset($week) ? $week->term_id : 0,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'weekday',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $weekday->term_id,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'mealtime',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $meal->term_id,
+                                                        ],
+                                                    ];
+                                                } else {
+                                                    // Weekly menu - filter by products that have weekly price
+                                                    $args['meta_query'][] = [
+                                                        'relation' => 'OR',
+                                                        [
+                                                            'key'     => 'εβδομαδιαίο',
+                                                            'value'   => '',
+                                                            'compare' => '!=',
+                                                        ],
+                                                        [
+                                                            'key'     => 'weekly_price',
+                                                            'value'   => '',
+                                                            'compare' => '!=',
+                                                        ],
+                                                    ];
+                                                    
+                                                    // For weekly menus, filter by day and meal taxonomies
+                                                    $args['tax_query'] = [
+                                                        'relation' => 'AND',
+                                                        [
+                                                            'taxonomy' => 'weekday',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $weekday->term_id,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'mealtime',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $meal->term_id,
+                                                        ],
+                                                    ];
+                                                }
+                                                
+                                                // Filter by meal time selection
+                                                if ($available_day == 1) {
+                                                    // Lunch & Dinner only - exclude breakfast
+                                                    $lunch_dinner_terms = get_terms([
+                                                        'taxonomy' => 'mealtime',
+                                                        'name__in' => ['Μεσημεριανό', 'Bραδινό'],
+                                                        'fields' => 'ids'
+                                                    ]);
+                                                    if (!empty($lunch_dinner_terms) && $meal->term_id && !in_array($meal->term_id, $lunch_dinner_terms)) {
+                                                        continue; // Skip breakfast
+                                                    }
+                                                } elseif ($available_day == 2) {
+                                                    // Only lunch
+                                                    $lunch_term = get_term_by('name', 'Μεσημεριανό', 'mealtime');
+                                                    if ($lunch_term && $meal->term_id != $lunch_term->term_id) {
+                                                        continue; // Skip non-lunch meals
+                                                    }
+                                                } elseif ($available_day == 3) {
+                                                    // Only dinner
+                                                    $dinner_term = get_term_by('name', 'Bραδινό', 'mealtime');
+                                                    if ($dinner_term && $meal->term_id != $dinner_term->term_id) {
+                                                        continue; // Skip non-dinner meals
+                                                    }
+                                                }
+                                                
+                                                $product_ids = get_posts($args);
+                                            } elseif (function_exists('get_products_by_menu_assignment')) {
+                                                // For ready menus, use the assignment function
+                                                $product_ids = get_products_by_menu_assignment(
+                                                    $program_menu,
+                                                    $week->term_id, // Monthly menus use week assignments
+                                                    $weekday->term_id,
+                                                    $meal->term_id
+                                                );
+                                            } else {
+                                                // Fallback to standard taxonomy query
+                                                $args = [
+                                                    'post_type'      => 'product',
+                                                    'posts_per_page' => -1,
+                                                    'fields'         => 'ids',
+                                                    'tax_query'      => [
+                                                        'relation' => 'AND',
+                                                        [
+                                                            'taxonomy' => 'program_menu',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $program_menu,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'week_no',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $week->term_id,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'weekday',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $weekday->term_id,
+                                                        ],
+                                                        [
+                                                            'taxonomy' => 'mealtime',
+                                                            'field'    => 'term_id',
+                                                            'terms'    => $meal->term_id,
+                                                        ],
+                                                    ],
+                                                ];
+                                                $product_ids = get_posts($args);
+                                            }
+                                            
+                                            if (!empty($product_ids)) :
+                                                $query = new WP_Query([
+                                                    'post_type'      => 'product',
+                                                    'post__in'       => $product_ids,
+                                                    'posts_per_page' => -1,
+                                                ]);
+                                            
+                                            if ($query->have_posts()) :
+                                                echo '<h3 class="act-title">' . esc_html($meal->name) . '</h3>';
+                                                echo '<div class="d-flex flex-wrap mainly-main">';
+                                                
+                                                while ($query->have_posts()) : $query->the_post();
+                                                    $product = wc_get_product(get_the_ID());
+                                                    $product_id = get_the_ID();
+                                                    $kcal_val = get_field('kcal', $product_id);
+                                                    $thumb = get_the_post_thumbnail_url($product_id, 'post-thumbnail')
+                                                        ?: wc_placeholder_img_src();
+                                                    
+                                                    // Get menu price
+                                                    $custom_price = '';
+                                                    if ($menu_type === 'own') {
+                                                        $custom_price = get_field('menu_price', $product_id);
+                                                    }
+                                                    ?>
+                                                    <div class="mainly-wd">
+                                                        <div class="mainly-bx">
+                                                            <img src="<?php echo esc_url($thumb); ?>" alt="">
+                                                            <div class="mainly-cnt">
+                                                                <h4><?php the_title(); ?></h4>
+                                                                <p>Θερμίδες μερίδας:
+                                                                    <strong><?php echo esc_html($kcal_val); ?>g</strong>
+                                                                </p>
+                                                                <?php if ($menu_type === 'own' && !empty($custom_price)) : ?>
+                                                                    <p class="product-price">
+                                                                        <strong>Τιμή: <?php echo wc_price($custom_price); ?></strong>
+                                                                    </p>
+                                                                <?php endif; ?>
+                                                                <?php if ($menu_type === 'own' && $product->is_type('simple')) : ?>
+                                                                    <a class="product-add-to-cart" href="#"
+                                                                        data-quantity="1"
+                                                                        data-product_id="<?php echo esc_attr($product->get_id()); ?>"
+                                                                        data-product_sku="<?php echo esc_attr($product->get_sku()); ?>"
+                                                                        data-week="<?php echo esc_attr($week->term_id); ?>"
+                                                                        data-week-name="<?php echo esc_attr($week->name); ?>"
+                                                                        data-day="<?php echo esc_attr($weekday->term_id); ?>"
+                                                                        data-day-name="<?php echo esc_attr($weekday->name); ?>"
+                                                                        data-meal="<?php echo esc_attr($meal->term_id); ?>"
+                                                                        data-meal-name="<?php echo esc_attr($meal->name); ?>"
+                                                                        rel="nofollow">
+                                                                        <?php esc_html_e('Προσθήκη στο καλάθι', 'woocommerce'); ?>
+                                                                    </a>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                <?php endwhile;
+                                                echo '</div>';
+                                                wp_reset_postdata();
+                                            endif;
+                                            endif; // End if (!empty($product_ids))
+                                        endforeach;
+                                    endif;
+                                endforeach;
+                            }
+                            ?>
+                        </div>
+                    </div>
+                    <?php
+                    $index++;
+                endforeach;
+            } else {
+                // Handle weekly menus (without week structure - just days)
+                foreach ($menu_days as $menu_day) :
+				
+				//$menu_day
+				//var_dump($menu_day);
+		        //object(WP_Term)#7403 (11) { ["term_id"]=> int(349) ["name"]=> string(14) "Δευτέρα" ["slug"]=> string(7) "deftera" ["term_group"]=> int(0) ["term_taxonomy_id"]=> int(349) ["taxonomy"]=> string(7) "weekday" ["description"]=> string(0) "" ["parent"]=> int(0) ["count"]=> int(15) ["filter"]=> string(3) "raw" ["term_order"]=> string(1) "1" }
+				
+				
+				
+				
+				/* --------------------------------------------------------------
+				 * Child terms (actual weekdays or month-days)
+				 * ------------------------------------------------------------*/
+                $children = get_terms([
+                    'taxonomy'   => $taxonomy_days,
+                    'parent'     => $menu_day->term_id,
+                    'hide_empty' => false,
+                    'orderby'    => 'term_id',
+                    'order'      => 'ASC',
+                ]);
+                if (is_wp_error($children)) {
+                    $children = [];
+                }
+
+                // Optional filter by related_days meta
+                if ($respect_related_days && is_array($related_days) && $related_days) {
+                    $children = array_filter(
+                        $children,
+                        fn($t) => in_array($t->term_id, $related_days, true)
+                    );
+                }
+
+                /* --------------------------------------------------------------
+				 * Sort children
+				 * ------------------------------------------------------------*/
+                if ($taxonomy_days === 'weekday' && $children) {
+					
+					//children
+					//var_dump($children);
+					//array(3) { [0]=> object(WP_Term)#7411 (11) { ["term_id"]=> int(352) ["name"]=> string(12) "Πρωινό" ["slug"]=> string(6) "proino" ["term_group"]=> int(0) ["term_taxonomy_id"]=> int(352) ["taxonomy"]=> string(7) "weekday" ["description"]=> string(0) "" ["parent"]=> int(349) ["count"]=> int(6) ["filter"]=> string(3) "raw" ["term_order"]=> string(1) "2" } [1]=> object(WP_Term)#7412 (11) { ["term_id"]=> int(351) ["name"]=> string(22) "Μεσημεριανό" ["slug"]=> string(11) "mesimeriano" ["term_group"]=> int(0) ["term_taxonomy_id"]=> int(351) ["taxonomy"]=> string(7) "weekday" ["description"]=> string(0) "" ["parent"]=> int(349) ["count"]=> int(3) ["filter"]=> string(3) "raw" ["term_order"]=> string(1) "3" } [2]=> object(WP_Term)#7402 (11) { ["term_id"]=> int(350) ["name"]=> string(13) "Bραδινό" ["slug"]=> string(7) "bradino" ["term_group"]=> int(0) ["term_taxonomy_id"]=> int(350) ["taxonomy"]=> string(7) "weekday" ["description"]=> string(0) "" ["parent"]=> int(349) ["count"]=> int(7) ["filter"]=> string(3) "raw" ["term_order"]=> string(1) "4" } }
+					
+                    $weekday_order = [
+                        'δευτερα'   => 1,
+                        'τριτη'     => 2,
+                        'τεταρτη'   => 3,
+                        'πεμπτη'    => 4,
+                        'παρασκευη' => 5,
+                        'σαββατο'   => 6,
+                        'κυριακη'   => 7,
+                    ];
+                    $normalize = static function ($str) {
+                        $str = remove_accents($str);
+                        return mb_strtolower($str, 'UTF-8');
+                    };
+
+                    usort($children, static function ($a, $b) use ($weekday_order, $normalize) {
+                        return ($weekday_order[$normalize($a->name)] ?? 99)
+                            <=> ($weekday_order[$normalize($b->name)] ?? 99);
+                    });
+                } elseif ($taxonomy_days === 'monthly_menu_days' && $children) {
+
+                    usort($children, static function ($a, $b) {
+                        return intval($a->name) <=> intval($b->name);
+                    });
+                } ?>
+
+                <div class="tab-act">
+                    <?php $checked = $index === 1 ? 'checked' : ''; ?>
+                    <input type="checkbox"
+                        id="woopm-acc-<?php echo esc_attr($index); ?>"
+                        name="accordion-woopm-<?php echo esc_attr($index); ?>"
+                        <?php echo $checked; ?>>
+
+                    <label for="woopm-acc-<?php echo esc_attr($index); ?>" class="tab__label">
+                        <?php echo esc_html($menu_day->name); ?>
+                    </label>
+
+                    <div class="tab__content-act">
+                        <?php
+                        // For weekly menus, the day is already shown in the label above
+                        
+                        // Get all meal times from mealtime taxonomy
+                        $meals = get_terms([
+                            'taxonomy'   => 'mealtime',
+                            'hide_empty' => false,
+                            'orderby'    => 'term_id',
+                            'order'      => 'ASC',
+                        ]);
+                        
+                        if (!is_wp_error($meals) && !empty($meals)) {
+                            foreach ($meals as $meal) :
+
+                                // Get products for this day/meal combination
+                                if ($menu_type === 'own') {
+                                    // For "make your own menu", show all products available for this meal type
+                                    // regardless of menu assignment
+                                    $args = [
+                                        'post_type'      => 'product',
+                                        'posts_per_page' => -1,
+                                        'fields'         => 'ids',
+                                        'tax_query'      => [
+                                            'relation' => 'AND',
+                                            [
+                                                'taxonomy' => 'weekday',
+                                                'field'    => 'term_id',
+                                                'terms'    => $menu_day->term_id,
+                                            ],
+                                            [
+                                                'taxonomy' => 'mealtime',
+                                                'field'    => 'term_id',
+                                                'terms'    => $meal->term_id,
+                                            ],
+                                        ],
+                                    ];
+                                    
+                                    // Filter by meal time selection
+                                    if ($available_day == 1) {
+                                        // Lunch & Dinner only - exclude breakfast
+                                        $lunch_dinner_terms = get_terms([
+                                            'taxonomy' => 'mealtime',
+                                            'name__in' => ['Μεσημεριανό', 'Bραδινό'],
+                                            'fields' => 'ids'
+                                        ]);
+                                        if (!empty($lunch_dinner_terms) && $meal->term_id && !in_array($meal->term_id, $lunch_dinner_terms)) {
+                                            continue; // Skip breakfast
+                                        }
+                                    } elseif ($available_day == 2) {
+                                        // Only lunch
+                                        $lunch_term = get_term_by('name', 'Μεσημεριανό', 'mealtime');
+                                        if ($lunch_term && $meal->term_id != $lunch_term->term_id) {
+                                            continue; // Skip non-lunch meals
+                                        }
+                                    } elseif ($available_day == 3) {
+                                        // Only dinner
+                                        $dinner_term = get_term_by('name', 'Bραδινό', 'mealtime');
+                                        if ($dinner_term && $meal->term_id != $dinner_term->term_id) {
+                                            continue; // Skip non-dinner meals
+                                        }
+                                    }
+                                    
+                                    $product_ids = get_posts($args);
+                                } elseif (function_exists('get_products_by_menu_assignment')) {
+                                    // For ready menus, use the assignment function
+                                    $product_ids = get_products_by_menu_assignment(
+                                        $program_menu,
+                                        null, // No week for weekly menus
+                                        $menu_day->term_id,
+                                        $meal->term_id
+                                    );
+                                } else {
+                                    // Fallback query
+                                    $args = [
+                                        'post_type'      => 'product',
+                                        'posts_per_page' => -1,
+                                        'fields'         => 'ids',
+                                        'tax_query'      => [
+                                            'relation' => 'AND',
+                                            [
+                                                'taxonomy' => 'program_menu',
+                                                'field'    => 'term_id',
+                                                'terms'    => $program_menu,
+                                            ],
+                                            [
+                                                'taxonomy' => 'weekday',
+                                                'field'    => 'term_id',
+                                                'terms'    => $menu_day->term_id,
+                                            ],
+                                            [
+                                                'taxonomy' => 'mealtime',
+                                                'field'    => 'term_id',
+                                                'terms'    => $meal->term_id,
+                                            ],
+                                        ],
+                                    ];
+                                    $product_ids = get_posts($args);
+                                }
+                                
+                                if (!empty($product_ids)) {
+                                    // Query the actual products
+                                    $query = new WP_Query([
+                                        'post_type'      => 'product',
+                                        'post__in'       => $product_ids,
+                                        'posts_per_page' => -1,
+                                    ]);
+                                    
+                                    if ($query->have_posts()) :
+                                        echo '<h3 class="act-title">' . esc_html($meal->name) . '</h3>';
+
+                                        echo '<div class="d-flex flex-wrap mainly-main">';
+
+                                        while ($query->have_posts()) : $query->the_post();
+                                            $product       = wc_get_product(get_the_ID());
+                                            $product_id    = get_the_ID();
+                                            $kcal_val      = get_field('kcal', $product_id);
+                                            $thumb         = get_the_post_thumbnail_url($product_id, 'post-thumbnail')
+                                                ?: wc_placeholder_img_src();
+                                            
+                                            // Get menu price
+                                            $custom_price = '';
+                                            if ($menu_type === 'own') {
+                                                $custom_price = get_field('menu_price', $product_id);
+                                            }
+                                            ?>
+                                            <div class="mainly-wd">
+                                                <div class="mainly-bx">
+                                                    <img src="<?php echo esc_url($thumb); ?>" alt="">
+                                                    <div class="mainly-cnt">
+                                                        <h4><?php the_title(); ?></h4>
+                                                        <p>Θερμίδες μερίδας:
+                                                            <strong><?php echo esc_html($kcal_val); ?>g</strong>
+                                                        </p>
+                                                        <?php if ($menu_type === 'own' && !empty($custom_price)) : ?>
+                                                            <p class="product-price">
+                                                                <strong>Τιμή: <?php echo wc_price($custom_price); ?></strong>
+                                                            </p>
+                                                        <?php endif; ?>
+                                                        <?php if ($menu_type === 'own' && $product->is_type('simple')) : ?>
+                                                            <a class="product-add-to-cart" href="#"
+                                                                data-quantity="1"
+                                                                data-product_id="<?php echo esc_attr($product->get_id()); ?>"
+                                                                data-product_sku="<?php echo esc_attr($product->get_sku()); ?>"
+                                                                data-week=""
+                                                                data-week-name=""
+                                                                data-day="<?php echo esc_attr($menu_day->term_id); ?>"
+                                                                data-day-name="<?php echo esc_attr($menu_day->name); ?>"
+                                                                data-meal="<?php echo esc_attr($meal->term_id); ?>"
+                                                                data-meal-name="<?php echo esc_attr($meal->name); ?>"
+                                                                rel="nofollow">
+                                                                <?php esc_html_e('Προσθήκη στο καλάθι', 'woocommerce'); ?>
+                                                            </a>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        <?php endwhile;
+                                        echo '</div>'; // mainly-main
+
+                                        wp_reset_postdata();
+                                    endif; // End if ($query->have_posts())
+                                } // End if (!empty($product_ids))
+                            endforeach; // End foreach ($meals as $meal)
+                        }
+                        ?>
+                    </div><!-- .tab__content-act -->
+                </div><!-- .tab-act -->
+                <?php $index++;
+                endforeach; // End foreach ($menu_days as $menu_day)
+                
+                // End of monthly menu display
+            } // End else (monthly menus)
+            ?>
+        </div><!-- .accordion -->
+        <?php
+
+        /* --------------------------------------------------------------
+		 * 6. Totals & output
+		 * ------------------------------------------------------------*/
+        $kcal_total = get_category_products_total_price_by_taxonomy('program_menu', $program_menu, $menu_type, $program); 
+        error_log("Menu price calculation - Menu ID: $program_menu, Type: $menu_type, Program: $program, Price: " . $kcal_total['total_price'] . ", Count: " . ($kcal_total['product_count'] ?? 0));
+        ?>
+        <?php if ($menu_type === 'ready'): ?>
+        <div class="total-m woopm-bottom-add-to-cart">
+            <h3 class="frm-title">Κόστος: <?php echo $kcal_total['total_price']; ?></h3>
+            <?php if (isset($kcal_total['product_count']) && $kcal_total['product_count'] > 0): ?>
+                <p class="product-count">(<?php echo $kcal_total['product_count']; ?> προϊόντα)</p>
+            <?php endif; ?>
+        </div>
+        <?php else: ?>
+        <div class="total-m woopm-bottom-add-to-cart">
+            <p class="info-text">Τα προϊόντα προστίθενται μεμονωμένα στο καλάθι με τις ειδικές τιμές του προγράμματος</p>
+        </div>
+        <?php endif; ?>
+<?php
+
+        $content = ob_get_clean();
+        wp_send_json_success([
+            'content'    => $content,
+            'kcal_total' => $kcal_total,
+        ]);
+    }
+	
+	
+	
+	
+	
+	
+
+
+    public function woopm_add_to_cart_product()
+    {
+        if (! check_ajax_referer('woopm_nonce', 'security', false)) {
+            wp_send_json_error('Invalid nonce provided');
+            exit;
+        }
+
+        $zipcode = isset($_POST['zipcode']) ? sanitize_text_field($_POST['zipcode']) : '';
+        $current_program = isset($_POST['current_program']) ? sanitize_text_field($_POST['current_program']) : '';
+        $current_program_menu = isset($_POST['current_program_menu']) ? sanitize_text_field($_POST['current_program_menu']) : '';
+        $current_available_menu = isset($_POST['current_available_menu']) ? sanitize_text_field($_POST['current_available_menu']) : '';
+        $current_day = isset($_POST['current_day']) ? intval($_POST['current_day']) : '';
+        $current_allergens = isset($_POST['current_allergens']) ? sanitize_text_field($_POST['current_allergens']) : '';
+        $current_allergens_other = isset($_POST['current_allergens_other']) ? sanitize_text_field($_POST['current_allergens_other']) : '';
+
+        if ($current_program == 'monthly_menu') {
+            $current_program_val = 'Μηνιαίο';
+        } else {
+            $current_program_val = 'Εβδομαδιαίο';
+        }
+
+        if ($current_program_menu == 'ready') {
+            $current_program_menu_val = 'Έτοιμα μενού';
+        } else {
+            $current_program_menu_val = 'Φτιάξε το δικό σου μενού';
+        }
+
+        if ($current_day == -1) {
+            $current_day_val = 'Πλήρες μενού';
+        } else {
+            $current_day_val = $current_day;
+        }
+
+        // Process allergens using the helper function
+        $current_allergens_value = $this->process_allergens($current_allergens, $current_allergens_other);
+        $current_available_menu_val = get_term_by('id', $current_available_menu, 'program_menu');
+
+        $cart_menu_data = array(
+            'ταχυδρομικός κώδικας' => $zipcode,
+            'Πρόγραμμα' => $current_program_val,
+            'Μενού' => $current_program_menu_val,
+            'Διαθέσιμα μενού' => $current_available_menu_val->name,
+            'Διαθέσιμα μενού ημέρας' => $current_day_val,
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => $current_allergens_value,
+        );
+        // echo $current_allergens; die;
+        if ($current_program_menu == 'own' && !empty($current_allergens)) {
+
+            $existing_cart_menu_data = WC()->session->get('cart_menu_data');
+
+            if (!empty($existing_cart_menu_data)) {
+                $existing_cart_menu_data['Αλλεργιογόνα & ιδιαίτερες προτιμήσεις'] = $current_allergens_value;
+                WC()->session->set('cart_menu_data', $existing_cart_menu_data);
+                wp_send_json_success(array(
+                    'content' => [],
+                    'message' => 'Allergens updated successfully'
+                ));
+            } else {
+                wp_send_json_error('Δεν έχετε προϊόντα στο καλάθι σας. Προσθέστε μερικά.');
+            }
+        }
+
+        $term = get_term($current_available_menu, 'program_menu');
+        $products = [];
+        $productids = [];
+
+        error_log("Adding to cart - Menu: $current_available_menu, Program: $current_program, Menu Type: $current_program_menu");
+
+        if (!is_wp_error($term) && !empty($term)) {
+            // NEW: First try to find a product with the same name as the menu
+            error_log("Searching for menu product with name: " . $term->name);
+            
+            $menu_product_args = array(
+                'post_type' => 'product',
+                'posts_per_page' => 1,
+                'post_status' => 'publish',
+                's' => $term->name
+            );
+            
+            $menu_products = get_posts($menu_product_args);
+            error_log("Found " . count($menu_products) . " products by name search");
+            
+            // If no product found by name, try by slug
+            if (empty($menu_products)) {
+                $menu_product_args = array(
+                    'post_type' => 'product',
+                    'name' => $term->slug,
+                    'posts_per_page' => 1
+                );
+                $menu_products = get_posts($menu_product_args);
+            }
+            
+            // If we found a menu product, use it
+            if (!empty($menu_products)) {
+                $menu_product_id = $menu_products[0]->ID;
+                error_log("Found menu product with ID: $menu_product_id for menu: " . $term->name);
+                
+                // For ready menus, add just this one product
+                $productids = array($menu_product_id);
+                $use_occurrences = false;
+                
+                // Ensure we have the product object
+                $product = wc_get_product($menu_product_id);
+                if (!$product) {
+                    error_log("ERROR: Could not get WooCommerce product object for ID: $menu_product_id");
+                    wp_send_json_error('Menu product not found. Please contact support.');
+                    return;
+                }
+            } else {
+                // Original logic: get products from menu assignments
+                error_log("No menu product found, falling back to individual products");
+                
+                // First try to get products from term meta (legacy method)
+                $productids = get_term_meta($current_available_menu, 'product', true);
+                $use_occurrences = false;
+                
+                // If no products in term meta, get products using menu assignments
+                if (empty($productids)) {
+                    error_log("No products in term meta, trying menu assignments for menu ID: $current_available_menu");
+                    
+                    // For ready menus, get all product occurrences
+                    if (function_exists('get_all_product_occurrences_by_menu')) {
+                        // Check if this is a monthly menu
+                        $menu_type_meta = get_term_meta($current_available_menu, 'menu_type', true);
+                        $is_monthly = ($menu_type_meta === 'monthly');
+                        
+                        $occurrences = get_all_product_occurrences_by_menu($current_available_menu, null, null, null, $is_monthly);
+                        $use_occurrences = true;
+                        error_log("Menu type: $menu_type_meta, Found " . count($occurrences) . " product occurrences");
+                    } else {
+                        // Fallback to unique products
+                        $productids = get_products_by_menu_assignment($current_available_menu, null, null, null);
+                        error_log("Found products via assignments: " . print_r($productids, true));
+                    }
+                }
+            }
+        } else {
+            wp_send_json_error('Invalid menu selection');
+        }
+
+        $added_products = array();
+        $product_quantities = array();
+        
+        if ($use_occurrences && !empty($occurrences)) {
+            // Count quantities for each product
+            foreach ($occurrences as $occurrence) {
+                $pid = $occurrence['product_id'];
+                if (!isset($product_quantities[$pid])) {
+                    $product_quantities[$pid] = 0;
+                }
+                $product_quantities[$pid]++;
+            }
+            
+            // Calculate total menu price
+            $menu_total_price = 0;
+            foreach ($product_quantities as $product_id => $quantity) {
+                $product = wc_get_product($product_id);
+                if ($product) {
+                    $price = floatval($product->get_price());
+                    $menu_total_price += ($price * $quantity);
+                }
+            }
+            
+            // Add each product with its total quantity and menu metadata
+            foreach ($product_quantities as $product_id => $quantity) {
+                $product = wc_get_product($product_id);
+                
+                if ($product) {
+                    // Prepare cart item data with menu information
+                    $cart_item_data = array(
+                        'menu_selection' => array(
+                            'menu_id' => $current_available_menu,
+                            'menu_name' => $current_available_menu_val->name,
+                            'menu_type' => $menu_type_meta ?? 'unknown',
+                            'program' => $current_program,
+                            'program_type' => $current_program_val,
+                            'menu_category' => $current_program_menu_val,
+                            'total_menu_price' => $menu_total_price,
+                            'total_menu_items' => count($occurrences),
+                            'zipcode' => $zipcode,
+                            'allergens' => $current_allergens_value,
+                            'day_selection' => $current_day_val
+                        )
+                    );
+                    
+                    $added_to_cart = WC()->cart->add_to_cart($product_id, $quantity, 0, array(), $cart_item_data);
+                    
+                    if ($added_to_cart) {
+                        $added_products[] = array(
+                            'product_id' => $product_id,
+                            'product_name' => $product->get_name(),
+                            'product_url' => $product->get_permalink(),
+                            'price' => $product->get_price(),
+                            'quantity' => $quantity
+                        );
+                        error_log("Added product $product_id to cart: " . $product->get_name() . " x $quantity with menu data");
+                    }
+                }
+            }
+        } elseif (!empty($productids)) {
+            // Check if this is a single menu product
+            $is_menu_product = (count($productids) === 1 && !empty($menu_products));
+            
+            if ($is_menu_product) {
+                // Single menu product - apply custom pricing
+                $product_id = $productids[0];
+                $product = wc_get_product($product_id);
+                
+                if ($product) {
+                    // Get custom price based on program type
+                    $custom_price = null;
+                    if ($current_program == 'monthly_menu') {
+                        $custom_price = get_field('monthly_price', $product_id);
+                        if (empty($custom_price)) {
+                            $custom_price = get_field('menu_price', $product_id);
+                        }
+                    } elseif ($current_program == 'weekly_menu') {
+                        $custom_price = get_field('weekly_price', $product_id);
+                        if (empty($custom_price)) {
+                            $custom_price = get_field('menu_price', $product_id);
+                        }
+                    }
+                    
+                    // Use custom price if available, otherwise regular price
+                    $menu_price = !empty($custom_price) ? floatval(str_replace(',', '.', $custom_price)) : $product->get_price();
+                    
+                    // Prepare cart item data with menu information
+                    $cart_item_data = array(
+                        'menu_selection' => array(
+                            'menu_id' => $current_available_menu,
+                            'menu_name' => $current_available_menu_val->name,
+                            'menu_type' => get_term_meta($current_available_menu, 'menu_type', true) ?? 'unknown',
+                            'program' => $current_program,
+                            'program_type' => $current_program_val,
+                            'menu_category' => $current_program_menu_val,
+                            'custom_price' => $custom_price,
+                            'is_menu_product' => true,
+                            'total_menu_price' => $menu_price,
+                            'total_menu_items' => 1,
+                            'zipcode' => $zipcode,
+                            'allergens' => $current_allergens_value,
+                            'day_selection' => $current_day_val
+                        )
+                    );
+                    
+                    $added_to_cart = WC()->cart->add_to_cart($product_id, 1, 0, array(), $cart_item_data);
+                    
+                    if ($added_to_cart) {
+                        $added_products[] = array(
+                            'product_id' => $product_id,
+                            'product_name' => $product->get_name(),
+                            'product_url' => $product->get_permalink(),
+                            'price' => $menu_price,
+                            'quantity' => 1
+                        );
+                        error_log("Added menu product $product_id to cart: " . $product->get_name() . " with custom price: $menu_price");
+                    }
+                }
+            } else {
+                // Multiple products - original logic
+                $menu_total_price = 0;
+                foreach ($productids as $product_id) {
+                    $product = wc_get_product($product_id);
+                    if ($product) {
+                        $menu_total_price += $product->get_price();
+                    }
+                }
+                
+                // Add each product once with menu metadata
+                foreach ($productids as $product_id) {
+                    $quantity = 1;
+                    $product = wc_get_product($product_id);
+                    
+                    if ($product) {
+                        // Prepare cart item data with menu information
+                        $cart_item_data = array(
+                            'menu_selection' => array(
+                                'menu_id' => $current_available_menu,
+                                'menu_name' => $current_available_menu_val->name,
+                                'menu_type' => get_term_meta($current_available_menu, 'menu_type', true) ?? 'unknown',
+                                'program' => $current_program,
+                                'program_type' => $current_program_val,
+                                'menu_category' => $current_program_menu_val,
+                                'total_menu_price' => $menu_total_price,
+                                'total_menu_items' => count($productids),
+                                'zipcode' => $zipcode,
+                                'allergens' => $current_allergens_value,
+                                'day_selection' => $current_day_val
+                            )
+                        );
+                        
+                        $added_to_cart = WC()->cart->add_to_cart($product_id, $quantity, 0, array(), $cart_item_data);
+                        
+                        if ($added_to_cart) {
+                            $added_products[] = array(
+                                'product_id' => $product_id,
+                                'product_name' => $product->get_name(),
+                                'product_url' => $product->get_permalink(),
+                                'price' => $product->get_price(),
+                                'quantity' => $quantity
+                            );
+                            error_log("Added product $product_id to cart: " . $product->get_name() . " with menu data");
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (!empty($added_products)) {
+            WC()->session->set('cart_menu_data', null);
+            WC()->session->set('cart_menu_data', $cart_menu_data);
+
+            wp_send_json_success(array(
+                'content' => $added_products,
+                'total_products' => count($added_products),
+                'message' => 'Products added to cart successfully!'
+            ));
+        } else {
+            error_log("ERROR: No products added to cart");
+            error_log("productids was: " . print_r($productids, true));
+            error_log("use_occurrences was: " . ($use_occurrences ? 'true' : 'false'));
+            if ($use_occurrences && isset($occurrences)) {
+                error_log("occurrences count: " . count($occurrences));
+            }
+            wp_send_json_error('No products could be added to cart. Please try again or contact support.');
+        }
+    }
+
+    /**
+     * Προσθήκη μεμονωμένου προϊόντος στο καλάθι (για προσωπικά μενού)
+     * 
+     * Διαχειρίζεται την προσθήκη ενός προϊόντος με:
+     * - Προσαρμοσμένες τιμές (εβδομαδιαία/μηνιαία)
+     * - Πληροφορίες προγραμματισμού (εβδομάδα, ημέρα, γεύμα)
+     * - Μεταδεδομένα μενού και αλλεργιογόνων
+     * - Ενημέρωση mini cart με AJAX
+     */
+    public function woopm_add_to_cart_single_product()
+    {
+        // Έλεγχος ασφαλείας nonce
+        if (! check_ajax_referer('woopm_nonce', 'security', false)) {
+            wp_send_json_error('Invalid nonce provided');
+            exit;
+        }
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        $zipcode = isset($_POST['zipcode']) ? sanitize_text_field($_POST['zipcode']) : '';
+        $current_program = isset($_POST['current_program']) ? sanitize_text_field($_POST['current_program']) : '';
+        $current_program_menu = isset($_POST['current_program_menu']) ? sanitize_text_field($_POST['current_program_menu']) : '';
+        $current_available_menu = isset($_POST['current_available_menu']) ? sanitize_text_field($_POST['current_available_menu']) : '';
+        $current_day = isset($_POST['current_day']) ? intval($_POST['current_day']) : '';
+        $current_allergens = isset($_POST['current_allergens']) ? sanitize_text_field($_POST['current_allergens']) : '';
+        $current_allergens_other = isset($_POST['current_allergens_other']) ? sanitize_text_field($_POST['current_allergens_other']) : '';
+        
+        // Get schedule data
+        $week_id = isset($_POST['week_id']) ? intval($_POST['week_id']) : '';
+        $week_name = isset($_POST['week_name']) ? sanitize_text_field($_POST['week_name']) : '';
+        $day_id = isset($_POST['day_id']) ? intval($_POST['day_id']) : '';
+        $day_name = isset($_POST['day_name']) ? sanitize_text_field($_POST['day_name']) : '';
+        $meal_id = isset($_POST['meal_id']) ? intval($_POST['meal_id']) : '';
+        $meal_name = isset($_POST['meal_name']) ? sanitize_text_field($_POST['meal_name']) : '';
+
+        if ($current_program == 'monthly_menu') {
+            $current_program_val = 'Μηνιαίο';
+        } else {
+            $current_program_val = 'Εβδομαδιαίο';
+        }
+
+        if ($current_program_menu == 'ready') {
+            $current_program_menu_val = 'Έτοιμα μενού';
+        } else {
+            $current_program_menu_val = 'Φτιάξε το δικό σου μενού';
+        }
+
+        if ($current_day == -1) {
+            $current_day_val = 'Πλήρες μενού';
+        } else {
+            $current_day_val = $current_day;
+        }
+
+        // Process allergens using the helper function
+        $current_allergens_value = $this->process_allergens($current_allergens, $current_allergens_other);
+
+        $current_available_menu_val = get_term_by('id', $current_available_menu, 'program_menu');
+
+        $cart_menu_data = array(
+            'ταχυδρομικός κώδικας' => $zipcode,
+            'Πρόγραμμα' => $current_program_val,
+            'Μενού' => $current_program_menu_val,
+            'Διαθέσιμα μενού' => $current_available_menu_val->name,
+            'Διαθέσιμα μενού ημέρας' => $current_day_val,
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => $current_allergens_value,
+        );
+
+        $product = wc_get_product($product_id);
+
+        if ($product) {
+            $quantity = 1;
+            
+            // Get custom price based on program type
+            $custom_price = null;
+            if ($current_program_menu == 'own') {
+                if ($current_program == 'monthly_menu') {
+                    $custom_price = get_field('menu_price', $product_id);
+                } elseif ($current_program == 'weekly_menu') {
+                    $custom_price = get_field('menu_price', $product_id);
+                }
+            }
+
+            // Create unique key for schedule
+            $schedule_key = '';
+            if (!empty($week_id)) {
+                $schedule_key .= 'w' . $week_id . '_';
+            }
+            if (!empty($day_id)) {
+                $schedule_key .= 'd' . $day_id . '_';
+            }
+            if (!empty($meal_id)) {
+                $schedule_key .= 'm' . $meal_id;
+            }
+            
+            // Prepare cart item data with menu information
+            $cart_item_data = array(
+                'menu_selection' => array(
+                    'menu_id' => $current_available_menu,
+                    'menu_name' => $current_available_menu_val->name,
+                    'menu_type' => get_term_meta($current_available_menu, 'menu_type', true) ?? 'unknown',
+                    'program' => $current_program,
+                    'program_type' => $current_program_val,
+                    'menu_category' => $current_program_menu_val,
+                    'custom_price' => $custom_price,
+                    'is_custom_menu' => true,
+                    'zipcode' => $zipcode,
+                    'allergens' => $current_allergens_value,
+                    'day_selection' => $current_day_val,
+                    'schedule' => array(
+                        'week_id' => $week_id,
+                        'week_name' => $week_name,
+                        'day_id' => $day_id,
+                        'day_name' => $day_name,
+                        'meal_id' => $meal_id,
+                        'meal_name' => $meal_name
+                    ),
+                    'schedule_key' => $schedule_key
+                )
+            );
+
+            $added_to_cart = WC()->cart->add_to_cart($product_id, $quantity, 0, array(), $cart_item_data);
+
+            if ($added_to_cart) {
+                WC()->session->set('cart_menu_data', null);
+                WC()->session->set('cart_menu_data', $cart_menu_data);
+                
+                // Create schedule text for success message
+                $schedule_text = '';
+                if (!empty($week_name)) {
+                    $schedule_text .= $week_name . ' - ';
+                }
+                if (!empty($day_name)) {
+                    $schedule_text .= $day_name;
+                }
+                if (!empty($meal_name)) {
+                    $schedule_text .= ' - ' . $meal_name;
+                }
+
+                // Get cart fragments for mini cart update
+                ob_start();
+                woocommerce_mini_cart();
+                $mini_cart = ob_get_clean();
+                
+                $data = array(
+                    'fragments' => apply_filters('woocommerce_add_to_cart_fragments', array(
+                        'div.widget_shopping_cart_content' => '<div class="widget_shopping_cart_content">' . $mini_cart . '</div>',
+                    )),
+                    'cart_hash' => WC()->cart->get_cart_hash(),
+                    'message' => 'Product successfully added to the cart.',
+                    'cart_count' => WC()->cart->get_cart_contents_count(),
+                    'product_name' => $product->get_name(),
+                    'custom_price' => $custom_price ? wc_price($custom_price) : null,
+                    'schedule_info' => !empty($schedule_text) ? $schedule_text : null
+                );
+                
+                wp_send_json_success($data);
+            } else {
+                wp_send_json_error('Failed to add product to the cart.');
+            }
+        } else {
+            wp_send_json_error('Invalid product ID.');
+        }
+    }
+
+    public function woopm_modify_cart_item_prices($cart)
+    {
+        if (is_admin() && !defined('DOING_AJAX')) {
+            return;
+        }
+
+        if (did_action('woocommerce_before_calculate_totals') >= 2) {
+            return;
+        }
+
+        foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
+            $product_id = $cart_item['product_id'];
+            
+            // Check if this item has menu selection data
+            if (isset($cart_item['menu_selection']) && isset($cart_item['data'])) {
+                $menu_data = $cart_item['menu_selection'];
+                $product = $cart_item['data'];
+                
+                // Apply custom price if it's a custom menu item OR a menu product
+                if (!empty($menu_data['custom_price'])) {
+                    // Convert comma to dot for Greek decimal format
+                    $custom_price = str_replace(',', '.', $menu_data['custom_price']);
+                    $product->set_price($custom_price);
+                } elseif (isset($menu_data['is_menu_product']) && $menu_data['is_menu_product'] && !empty($menu_data['total_menu_price'])) {
+                    // For menu products, use the total menu price
+                    $product->set_price($menu_data['total_menu_price']);
+                }
+            } else {
+                // Fallback to session data for backward compatibility
+                $cart_menu_data = WC()->session->get('cart_menu_data');
+                
+                if (!empty($cart_menu_data) && isset($cart_item['data'])) {
+                    $product = $cart_item['data'];
+                    
+                    if ($cart_menu_data['Πρόγραμμα'] === 'Μηνιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού') {
+                        $new_price = get_field('menu_price', $product_id);
+                    } elseif ($cart_menu_data['Πρόγραμμα'] === 'Εβδομαδιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού') {
+                        $new_price = get_field('menu_price', $product_id);
+                    } else {
+                        $new_price = $product->get_price();
+                    }
+
+                    if (!empty($new_price)) {
+                        $product->set_price($new_price);
+                    }
+                }
+            }
+        }
+    }
+
+    public function woopm_display_cart_menu_data_on_checkout()
+    {
+        $cart_menu_data = WC()->session->get('cart_menu_data');
+        if (!empty($cart_menu_data)) {
+            echo '<h3>' . __('Blue Menu', 'woocommerce') . '</h3>';
+            echo '<ul>';
+
+            foreach ($cart_menu_data as $key => $value) {
+                if (!empty($value)) {
+                    echo '<li><strong>' . ucfirst(str_replace('_', ' ', $key)) . ': </strong>' . esc_html($value) . '</li>';
+                }
+            }
+
+            echo '</ul>';
+        }
+    }
+
+    public function woopm_clear_cart_session_if_empty()
+    {
+        if (WC()->cart->is_empty()) {
+            WC()->session->set('cart_menu_data', null);
+        }
+    }
+
+    public function woopm_apply_custom_price_in_cart($product_price, $cart_item, $cart_item_key)
+    {
+        // Check if this item has menu selection data with custom price
+        if (isset($cart_item['menu_selection']) && isset($cart_item['menu_selection']['custom_price']) && !empty($cart_item['menu_selection']['custom_price'])) {
+            $custom_price = $cart_item['menu_selection']['custom_price'];
+            
+            // Convert comma to dot for Greek decimal format
+            $custom_price = str_replace(',', '.', $custom_price);
+            
+            return wc_price($custom_price);
+        }
+        
+        // Fallback to session-based pricing for backward compatibility
+        $product = $cart_item['data'];
+        $product_id = $cart_item['product_id'];
+        $cart_menu_data = WC()->session->get('cart_menu_data');
+        $new_price = $product->get_price();
+
+        if (!empty($cart_menu_data)) {
+            if ($cart_menu_data['Πρόγραμμα'] === 'Μηνιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού') {
+                $new_price = get_field('menu_price', $product_id);
+            } elseif ($cart_menu_data['Πρόγραμμα'] === 'Εβδομαδιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού') {
+                $new_price = get_field('menu_price', $product_id);
+            } else {
+                $new_price = $product->get_price();
+            }
+        }
+
+        $new_price = floatval(str_replace(',', '.', $new_price));
+
+        return wc_price($new_price);  // Return custom formatted price
+    }
+
+    public function woopm_apply_custom_price_to_mini_cart()
+    {
+        // Force the recalculation of prices in the mini cart
+        WC()->cart->calculate_totals();
+    }
+
+
+
+
+    public function save_cart_menu_data_to_order($order, $data)
+    {
+        if (WC()->session->__isset('cart_menu_data')) {
+            $cart_menu_data = WC()->session->get('cart_menu_data');
+            if (!empty($cart_menu_data) && is_array($cart_menu_data)) {
+                foreach ($cart_menu_data as $key => $value) {
+                    $order->update_meta_data($key, $value);
+                }
+            }
+        }
+    }
+
+
+
+
+    // 1. Display custom fields on the checkout page
+    //add_action('woocommerce_after_order_notes', 'woopm_custom_checkout_fields');
+    public function woopm_custom_checkout_fields($checkout)
+    {
+        echo '<div id="woopm_custom_checkout_fields"><h3>' . __('Blue Menu Details') . '</h3>';
+
+        $fields = [
+            'ταχυδρομικός κώδικας' => 'Ταχυδρομικός Κώδικας',
+            'Πρόγραμμα' => 'Πρόγραμμα',
+            'Μενού' => 'Μενού',
+            'Διαθέσιμα μενού' => 'Διαθέσιμα μενού',
+            'Διαθέσιμα μενού ημέρας' => 'Διαθέσιμα μενού ημέρας',
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => 'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+        ];
+
+        foreach ($fields as $key => $label) {
+            $type = ($key === 'Διαθέσιμα μενού ημέρας' || $key === 'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις') ? 'textarea' : 'text';
+
+            woocommerce_form_field($key, [
+                'type'     => $type,
+                'class'    => ['form-row-wide'],
+                'label'    => __($label),
+                'required' => false,
+            ], $checkout->get_value($key));
+        }
+
+        echo '</div>';
+    }
+
+
+
+    // 2. Save the custom fields to the order
+    // add_action('woocommerce_checkout_update_order_meta', 'woopm_save_checkout_fields');
+    public function woopm_save_checkout_fields($order_id)
+    {
+        $keys = [
+            'ταχυδρομικός κώδικας',
+            'Πρόγραμμα',
+            'Μενού',
+            'Διαθέσιμα μενού',
+            'Διαθέσιμα μενού ημέρας',
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+        ];
+
+        foreach ($keys as $key) {
+            if (isset($_POST[$key])) {
+                $value = is_array($_POST[$key]) ? implode(', ', $_POST[$key]) : $_POST[$key];
+                update_post_meta($order_id, $key, sanitize_text_field($value));
+            }
+        }
+    }
+
+
+
+    // 3. Show the custom fields in the admin order details
+    // add_action('woocommerce_admin_order_data_after_order_details', 'woopm_display_custom_order_meta_admin');
+    public function woopm_display_custom_order_meta_admin($order)
+    {
+        $keys = [
+            'ταχυδρομικός κώδικας',
+            'Πρόγραμμα',
+            'Μενού',
+            'Διαθέσιμα μενού',
+            'Διαθέσιμα μενού ημέρας',
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+        ];
+
+        echo '<div class="order_data_column"><h3>' . __('Blue Menu Details') . '</h3>';
+        foreach ($keys as $key) {
+            $value = $order->get_meta($key);
+            if (!empty($value)) {
+                echo '<p><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</p>';
+            }
+        }
+        echo '</div>';
+    }
+}
+add_action('woocommerce_thankyou', 'woopm_show_blue_menu_on_thankyou', 20);
+
+function woopm_show_blue_menu_on_thankyou($order_id)
+{
+    $order = wc_get_order($order_id);
+
+    $menu_keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    echo '<h2>Blue Menu</h2><ul>';
+    foreach ($menu_keys as $key) {
+        $value = $order->get_meta($key);
+        if (!empty($value)) {
+            echo '<li><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</li>';
+        }
+    }
+    echo '</ul>';
+}
+
+
+add_action('woocommerce_email_order_details', 'woopm_add_cart_menu_data_to_email', 30, 4);
+
+function woopm_add_cart_menu_data_to_email($order, $sent_to_admin, $plain_text, $email)
+{
+    // Define keys to show in email
+    $menu_keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    // Gather the output
+    if (!$plain_text) {
+        echo '<h2>Blue Menu</h2><ul>';
+        foreach ($menu_keys as $key) {
+            $value = $order->get_meta($key);
+            if (!empty($value)) {
+                echo '<li><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</li>';
+            }
+        }
+        echo '</ul>';
+    } else {
+        // For plain text emails
+        echo "Blue Menu\n";
+        foreach ($menu_keys as $key) {
+            $value = $order->get_meta($key);
+            if (!empty($value)) {
+                echo $key . ': ' . $value . "\n";
+            }
+        }
+        echo "\n";
+    }
+}

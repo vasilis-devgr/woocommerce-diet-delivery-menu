@@ -1,0 +1,225 @@
+<?php
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+class WOOPMBlueMenu_Manager {
+
+    public function __construct() {
+      add_shortcode( 'blue_menus', [ $this, 'woopm_blue_menus_shortcode' ] );
+    }
+
+    /**
+     * Create custom shortcode for blue menu
+     */
+    public function woopm_blue_menus_shortcode() {
+        ob_start(); // Start capturing output
+        ?>
+        <div class="pattern-bg">
+            <div class="select-header">
+                <div class="inner-container">
+                    <div class="d-flex slct-bx">
+                        <div class="slc-left">
+                          <h2>BLUE <span>Menus</span></h2>
+                        </div>
+                        <div class="slc-right">
+                          <h3>Επίλεξε μενού</h3>
+                          <p>Με κάθε μηνιαίο μενού σας παρέχεται μία ΔΩΡΕΑΝ διατροφολογική συνεδρία, προκειμένου να γίνει μέτρηση βάρους, λιπώδους ιστού, μυϊκής μάζας, μεταβολικής ηλικίας και βασικού μεταβολικού ρυθμού.
+                          <p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="menus-form">
+                <div class="inner-container">
+                    <div class="mns-box">
+                        <img class="arrow-dw" src="/wp-content/uploads/2025/03/arrow-down-icon.png" />
+                        <div class="zip-box">
+                          <h3 class="frm-title">1. Βάλε τον ΤΚ σου:</h3>
+                          <input type="text" name="menu-zipcode" id="menu-zipcode" />
+                          <span class="zipcode-msg"></span>
+                        </div>
+                        <p>Συμπληρώστε τον Τ.Κ. σας για να εξακριβώσουμε αν εξυπηρετείται η περιοχή σας (μόνο Αττική).</p>
+                    </div>
+                    <div class="mns-box woopm-choose-program-section">
+                        <h3 class="frm-title">2. Eπίλεξε πρόγραμμα</h3>
+                        <div class="form__group d-flex flex-wrap">
+                            <div class="half-bx">
+                                <div class="form__radio-group">
+                                  <input id="small" type="radio" class="form__radio-input woopm-choose-program" value="monthly_menu" name="choose-program" disabled />
+                                  <label for="small" class="form__radio-label">
+                                    <span class="form__radio-label-text">
+                                      <span class="rd-bg-txt">BLUE</span>
+                                      <span class="rd-sm-txt">Μηνιαίο</span>
+                                      <span class="rd-bl-txt">
+                                        <strong>18 γεύματα.</strong> Καθημερινή παράδοση, από τις 8 π.μ. και μετά. </span>
+                                    </span>
+                                    <span class="form__radio-button"></span>
+                                  </label>
+                                </div>
+                            </div>
+                            <div class="half-bx">
+                                <div class="form__radio-group">
+                                  <input id="large" type="radio" class="form__radio-input woopm-choose-program" value="weekly_menu" name="choose-program" disabled/>
+                                  <label for="large" class="form__radio-label">
+                                    <span class="form__radio-label-text">
+                                      <span class="rd-bg-txt">BLUE</span>
+                                      <span class="rd-sm-txt">Εβδομαδιαίο</span>
+                                      <span class="rd-bl-txt">
+                                        <strong>Επιλογές 24, 48, 72 ή 96 γευμάτων.</strong> Καθημερινή παράδοση, από τις 8 π.μ. και μετά. </span>
+                                      <span class="form__radio-button"></span>
+                                    </span>
+                                  </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mns-box woopm-select-menu-section">
+                        <h3 class="frm-title">3. Eπίλεξε μενού</h3>
+                        <div class="form__group d-flex flex-wrap">
+                            <div class="half-bx">
+                                <div class="form__radio-group">
+                                  <input id="small2" type="radio" class="form__radio-input woopm-select-menu" value="ready" name="menu" disabled/>
+                                  <label for="small2" class="form__radio-label">
+                                    <span class="form__radio-label-text">
+                                      <span class="rd-md-txt">Έτοιμα μενού</span>
+                                    </span>
+                                    <span class="form__radio-button"></span>
+                                  </label>
+                                </div>
+                            </div>
+                            <div class="half-bx">
+                                <div class="form__radio-group">
+                                    <input id="large2" type="radio" class="form__radio-input woopm-select-menu" value="own" name="menu" disabled/>
+                                    <label for="large2" class="form__radio-label">
+                                        <span class="form__radio-label-text">
+                                        <span class="rd-md-txt">Φτιάξε το δικό σου μενού</span>
+                                         <span class="form__radio-button"></span>
+                                        </span>
+                                     </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mns-box woopm-available-menu-section">
+                        <h3 class="frm-title">4. Eπίλεξε από τα διαθέσιμα μενού</h3>
+                        <div class="d-flex flex-wrap field-bx">
+                            <div class="half-bx kcal-section">
+                                <div class="field-select">
+                                  <select name="kcal_category" class="kcal-category-select" disabled>
+                                  </select>
+                                </div>
+                            </div>
+                            <div class="half-bx kcal-section-days">
+                                <div class="field-select">
+                                  <select class="kcal-select-days" disabled>
+                                    <option value="-1">Πλήρες μενού</option>
+                                    <option value="1">Μεσημεριανό & Βραδινό</option>
+                                    <option value="2">Μόνο μεσημεριανό</option>
+                                    <option value="3">Μόνο βραδινό</option>
+                                  </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mns-box woopm-add-to-cart">
+                        <div class="d-flex flex-wrap field-bx">
+                            <div class="half-bx">
+                                <h3 class="frm-title woopm-product-prices">Κόστος: 0,00€</h3>
+                            </div>
+                            <div class="half-bx">
+                                <a class="cmn-btn woopm-add-to-cart-button" href="#">Προσθήκη στο καλάθι</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mns-box woopm-products">
+                    </div>
+                    <div class="mns-box woopm-allergens-section">
+                        <h3 class="frm-title">5. Αλλεργιογόνα & ιδιαίτερες προτιμήσεις</h3>
+                        <p>Πριν προχωρήσετε στην αγορά σας, θα θέλαμε να ξέρουμε ποιές από τις παρακάτω επιλογές δεν θα επιθυμούσατε να περιέχονται στο πρόγραμμά σας. Εάν έχετε κάποια αλλεργία ή δυσανεξία, παρακαλούμε να μας τα αναφέρετε στο πεδίο. Για ειδικές ομάδες και ειδικές προτιμίσεις παρακαλούμε όπως επικοινωνήστε απευθείας με την Blue Plate. Η διατροφολογική ομάδα του Blue Plate θα επικοινωνήσει μαζί σας, μετά την ολοκλήρωση της παραγγελίας.</p>
+                        <div class="form__group normal-checkbox">
+                            <div class="form__checkbox-group">
+                                <input id="s0" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="none" checked />
+                                <label for="s0" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Καμία</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s1" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="nuts" />
+                                <label for="s1" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Ξηροί καρποί</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s2" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="fishseafood"/>
+                                <label for="s2" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Ψάρι / Θαλασσινά</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s3" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="dairyproducts" />
+                                <label for="s3" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Γαλακτοκομικά</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s4" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="egg" />
+                                <label for="s4" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Αυγό </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s5" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="redmeat" />
+                                <label for="s5" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Κόκκινο κρέας </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__checkbox-group">
+                                <input id="s6" type="checkbox" class="form__checkbox-input woopm-select-allergens" name="allergens[]" value="other" />
+                                <label for="s6" class="form__checkbox-label">
+                                    <span class="form__checkbox-button"></span>
+                                    <span class="form__checkbox-label-text">
+                                        <span class="rd-md-txt">Άλλο (συμπληρώστε παρακάτω)</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form__input woopm-select-allergens-other-section" style="display:none;">
+                                <input type="text" class="woopm-select-allergens-other" placeholder="Περιγράψτε άλλες αλλεργίες ή δυσανεξίες" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mns-box woopm-menu-submit">
+                        <div class="form-sbt">
+                          <button type="button" class="woopm-add-to-cart-button">Ολοκλήρωση</button>
+                        </div>
+                    </div>
+					<div class="notice-menus">
+						<strong>Σημείωση: </strong>Για απογευματινό καταναλώστε 10 τεμάχια ξηρών καρπών (4 αμύγδαλα, 1 καρύδι, 4 φουντούκια, 1 καρύδι Βραζιλίας) μαζί με 1 φρούτο (ροδάκινο, μήλο, 1 φέτα πεπόνι, 1½ φέτα καρπούζι, 3-4 βερίκοκα, 1½ φλιτζάνι φράουλες κομμένες στα δύο, 18 ρόγες σταφύλι ή 18 κεράσια ή 1 πορτοκάλι, ή 2 μανταρίνια ή 1 ακτινίδιο, ή 1 αχλάδι, ή 1 μέτρια μπανάνα). Αν πεινάσετε, προσθέστε 1 γιαούρτι κατά προτίμηση κατσικίσιο, 2% ή 4%.
+					</div>
+                </div>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean(); // Return the captured output
+    }
+
+}

@@ -1,0 +1,302 @@
+/**
+ * WooCommerce Product Menu - Frontend Styles
+ */
+
+/* Form sections */
+
+h3.act-title.small {
+    font-size: 16px;
+    padding-bottom: 15px;
+}
+.mns-box {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #f9f9f9;
+    border-radius: 5px;
+}
+
+.frm-title {
+    margin-bottom: 20px;
+    font-size: 1.4em;
+    font-weight: bold;
+}
+
+/* Radio buttons */
+.form__radio-group {
+    margin-bottom: 15px;
+}
+
+.form__radio-input {
+    display: none;
+}
+
+.form__radio-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 10px;
+    transition: background 0.3s;
+}
+
+.form__radio-label:hover {
+    background: #f0f0f0;
+}
+
+.form__radio-button {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #333;
+    border-radius: 50%;
+    margin-right: 10px;
+    position: relative;
+}
+
+.form__radio-input:checked + .form__radio-label .form__radio-button::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #333;
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Checkbox styles for allergens */
+.form__checkbox-group {
+    margin-bottom: 15px;
+}
+
+.form__checkbox-input {
+    display: none;
+}
+
+.form__checkbox-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 10px;
+    transition: background 0.3s;
+}
+
+.form__checkbox-label:hover {
+    background: #f0f0f0;
+}
+
+.form__checkbox-button {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #333;
+    border-radius: 3px;
+    margin-right: 10px;
+    position: relative;
+}
+
+.form__checkbox-input:checked + .form__checkbox-label .form__checkbox-button::after {
+    content: '✓';
+    position: absolute;
+    font-size: 16px;
+    color: #333;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.normal-checkbox .form__checkbox-label-text {
+    flex: 1;
+}
+
+/* Accordion styles */
+.tab-act {
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.tab-act input[type="checkbox"] {
+    display: none;
+}
+
+.tab__label {
+    display: block;
+    padding: 15px 20px;
+    background: #f5f5f5;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background 0.3s;
+    margin: 0;
+}
+
+.tab__label:hover {
+    background: #e9e9e9;
+}
+
+.tab__label::after {
+    content: '+';
+    float: right;
+    font-size: 1.5em;
+    line-height: 1;
+}
+
+.tab-act input[type="checkbox"]:checked ~ .tab__label::after {
+    content: "\276F";
+}
+
+.tab__content-act {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+    background: white;
+}
+
+.tab-act input[type="checkbox"]:checked ~ .tab__content-act {
+    max-height: auto;
+    padding: 20px;
+    transition: max-height 0.5s ease-in;
+}
+.tab-act input:checked ~ .tab__content-act {
+    padding: 20px 20px;
+    max-height: 500px !important;
+    overflow-y: scroll;
+}
+
+/* Product grid */
+.mainly-main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.mainly-wd {
+    flex: 0 0 calc(33.333% - 20px);
+    min-width: 280px;
+}
+
+@media (max-width: 768px) {
+    .mainly-wd {
+        flex: 0 0 100%;
+    }
+}
+
+.mainly-bx {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.mainly-bx img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+}
+
+.mainly-cnt {
+    padding: 15px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.mainly-cnt h4 {
+    margin: 0 0 10px 0;
+    font-size: 1.1em;
+}
+
+.mainly-cnt p {
+    margin: 5px 0;
+}
+
+.product-price {
+    font-size: 1.2em;
+    color: #2a7d2e;
+    font-weight: bold;
+    margin: 10px 0 !important;
+}
+
+.product-add-to-cart {
+    display: inline-block;
+    padding: 10px 20px;
+    background: #333;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    margin-top: auto;
+    text-align: center;
+    transition: background 0.3s;
+}
+
+.product-add-to-cart:hover {
+    background: #555;
+    color: white;
+    text-decoration: none;
+}
+
+/* Disabled sections */
+.woopm-choose-program-section[style*="opacity: 0.5"],
+.woopm-select-menu-section[style*="opacity: 0.5"],
+.woopm-available-menu-section[style*="opacity: 0.5"] {
+    pointer-events: none;
+}
+
+/* Messages */
+.zipcode-msg {
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+/* Select dropdowns */
+.kcal-category-select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+/* Submit button */
+.woopm-add-to-cart-button {
+    background: #2a7d2e;
+    color: white;
+    padding: 15px 30px;
+    border: none;
+    border-radius: 4px;
+    font-size: 1.2em;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.woopm-add-to-cart-button:hover:not(:disabled) {
+    background: #236623;
+}
+
+.woopm-add-to-cart-button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Price display */
+.woopm-product-prices {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: #2a7d2e;
+    /*text-align: center;*/
+    /*padding: 20px;*/
+    /*background: #f0f8f0;*/
+    border-radius: 4px;
+    margin: 20px 0;
+}
+
+/* Meal section titles */
+.act-title {
+    font-size: 1.2em;
+    margin: 3px 0;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}

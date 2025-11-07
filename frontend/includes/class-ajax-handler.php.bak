@@ -1,0 +1,663 @@
+<?php
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+class WOOPMAjax_Handler {
+
+    public function __construct() {
+        add_action( 'wp_ajax_check_shipping_zipcode', array( $this, 'woopm_check_shipping_zipcode' ) );
+        add_action( 'wp_ajax_nopriv_check_shipping_zipcode', array( $this, 'woopm_check_shipping_zipcode' ) );
+        add_action( 'wp_ajax_get_available_menu_by_program', array( $this, 'woopm_get_available_menu_by_program' ) );
+        add_action( 'wp_ajax_nopriv_get_available_menu_by_program', array( $this, 'woopm_get_available_menu_by_program' ) );
+        add_action( 'wp_ajax_get_product_by_program_type', array( $this, 'woopm_get_product_by_program_type' ) );
+        add_action( 'wp_ajax_nopriv_get_product_by_program_type', array( $this, 'woopm_get_product_by_program_type' ) );
+
+        add_action( 'wp_ajax_add_to_cart_product', array( $this, 'woopm_add_to_cart_product' ) );
+        add_action( 'wp_ajax_nopriv_add_to_cart_product', array( $this, 'woopm_add_to_cart_product' ) );
+
+        add_action( 'wp_ajax_add_to_cart_single_product', array( $this, 'woopm_add_to_cart_single_product' ) );
+        add_action( 'wp_ajax_nopriv_add_to_cart_single_product', array( $this, 'woopm_add_to_cart_single_product' ) );
+
+        add_action('woocommerce_review_order_before_payment', array( $this, 'woopm_display_cart_menu_data_on_checkout' ) );
+        add_action('woocommerce_before_calculate_totals', array( $this, 'woopm_modify_cart_item_prices' ), 10, 1);
+
+        add_action('woocommerce_cart_updated', array( $this, 'woopm_clear_cart_session_if_empty' ));
+        add_action('woocommerce_cart_item_price', array( $this, 'woopm_apply_custom_price_in_cart' ), 10, 3);
+        add_action('woocommerce_before_mini_cart', array( $this, 'woopm_apply_custom_price_to_mini_cart' ), 10, 0);
+        add_action('woocommerce_checkout_create_order', array( $this, 'save_cart_menu_data_to_order' ), 20, 2);
+         add_action('woocommerce_after_order_notes', array($this,'woopm_custom_checkout_fields'));
+         add_action('woocommerce_checkout_update_order_meta', array($this,'woopm_save_checkout_fields'));
+         add_action('woocommerce_admin_order_data_after_order_details', array($this,'woopm_display_custom_order_meta_admin'));
+         //add_action('woocommerce_thankyou', array($this,'woopm_show_blue_menu_on_thankyou', 20));
+
+      
+       
+
+    }
+
+    public function woopm_check_shipping_zipcode() {
+        
+        if ( ! check_ajax_referer( 'woopm_nonce', 'security', false ) ) {
+            wp_send_json_error( 'Invalid nonce provided' );
+            exit;
+        }
+
+        $zipcode = isset( $_POST['zipcode'] ) ? sanitize_text_field( $_POST['zipcode'] ) : '';
+
+        $zones = WC_Shipping_Zones::get_zones();
+
+        foreach ( $zones as $zone ) {
+            $zone_regions = $zone['zone_locations'];
+            
+            foreach ( $zone_regions as $region ) {
+                if ( isset( $region->code ) && $region->type === 'postcode' ) {
+                    $region_postcodes = explode( ',', $region->code );
+
+                    foreach ( $region_postcodes as $region_postcode ) {
+                        $region_postcode = trim( $region_postcode );
+                        if ( $zipcode === $region_postcode ) {
+                            wp_send_json_success( 'Zipcode matches the shipping zone.' );
+                            exit;
+                        }
+                    }
+
+                }
+            }
+        }
+
+        // If no match was found
+        wp_send_json_error( 'No matching shipping zone found for the provided zipcode.' );
+        exit;
+    }
+
+    public function woopm_get_available_menu_by_program() {
+        if ( ! check_ajax_referer( 'woopm_nonce', 'security', false ) ) {
+            wp_send_json_error( 'Invalid nonce provided' );
+            exit;
+        }
+        $program = isset( $_POST['program'] ) ? sanitize_text_field( $_POST['program'] ) : '';
+        $available_menus_args = array(
+            'taxonomy'   => $program,
+            'orderby'    => 'term_id',
+            'order'      => 'ASC',
+            'hide_empty' => false
+        );
+        $available_menus = get_terms($available_menus_args);
+        ob_start();
+        if(!empty($available_menus)){
+            foreach ($available_menus as $available_menu) { 
+                echo '<option value='.$available_menu->term_id.'>'.$available_menu->name.'</option>';
+            }
+        }
+        $content = ob_get_clean();
+        wp_send_json_success( array( 'content' => $content) );
+    }
+
+    
+
+
+public function woopm_get_product_by_program_type() {
+    if ( ! check_ajax_referer( 'woopm_nonce', 'security', false ) ) {
+        wp_send_json_error( 'Invalid nonce provided' );
+        exit;
+    }
+
+    $program = isset( $_POST['program'] ) ? sanitize_text_field( $_POST['program'] ) : '';
+    $program_menu = isset( $_POST['program_menu'] ) ? intval( $_POST['program_menu'] ) : 0;
+    $menu_type = isset( $_POST['menu_type'] ) ? sanitize_text_field( $_POST['menu_type'] ) : '';
+
+    if ( $program === 'monthly_menu' ) {
+        $taxonomy_days = 'monthly_menu_days';
+    } elseif ( $program === 'weekly_menu' ) {
+        $taxonomy_days = 'weekday';
+    } else {
+        wp_send_json_error( 'Invalid program provided' );
+        exit;
+    }
+
+    $menu_days = get_terms([
+        'taxonomy'   => $taxonomy_days,
+        'orderby'    => 'term_id',
+        'order'      => 'ASC',
+        'hide_empty' => false,
+        'parent'     => 0
+    ]);
+
+    ob_start();
+    echo '<div class="accordion">';
+    $counter = 1;
+
+    foreach ( $menu_days as $menu_day ) {
+        $checkbox_id = 'cb' . $counter;
+        $checked = ($counter == 1) ? 'checked' : '';
+
+        echo '<div class="tab-act">';
+        echo '<input type="checkbox" name="accordion-' . esc_attr($checkbox_id) . '" id="' . esc_attr($checkbox_id) . '" ' . $checked . '>';
+        echo '<label for="' . esc_attr($checkbox_id) . '" class="tab__label">' . esc_html($menu_day->name) . '</label>';
+        echo '<div class="tab__content-act">';
+
+        // Get related days assigned to the selected program menu
+        $related_days = get_term_meta( $program_menu, 'related_days', true );
+       
+        $menu_days_childs = [];
+        if ( ! empty( $related_days ) && is_array( $related_days ) ) {
+            foreach ( $related_days as $day_id ) {
+                $term = get_term( $day_id );
+                if ( ! is_wp_error( $term ) && $term->parent == $menu_day->term_id ) {
+                    $menu_days_childs[] = $term;
+                }
+            }
+        }
+
+        if ( ! empty( $menu_days_childs ) ) {
+            foreach ( $menu_days_childs as $menu_days_child ) {
+                $args = array(
+                    'post_type'      => 'product',
+                    'posts_per_page' => -1,
+                    'tax_query'      => array(
+                        'relation' => 'AND',
+                        array(
+                            'taxonomy' => $program,
+                            'field'    => 'term_id',
+                            'terms'    => $program_menu,
+                        ),
+                        array(
+                            'taxonomy' => $menu_days_child->taxonomy,
+                            'field'    => 'slug',
+                            'terms'    => $menu_days_child->slug,
+                        ),
+                    ),
+                );
+
+                $query = new WP_Query($args);
+                $total_kcal = get_total_kcal_by_taxonomy($program, $program_menu, $menu_days_child->taxonomy, $menu_days_child->slug);
+                $total_kcal_val = ($menu_type === 'own') ? ' (' . $total_kcal['total_kcal'] . ' kcal)' : '';
+
+                echo '<h3 class="act-title">' . esc_html($menu_days_child->name . $total_kcal_val) . '</h3>';
+                echo '<div class="d-flex flex-wrap mainly-main">';
+
+                if ( $query->have_posts() ) {
+                    while ( $query->have_posts() ) {
+                        $query->the_post();
+                        $product = wc_get_product( get_the_ID() );
+                        $kcal_val = get_field( "kcal", get_the_ID() );
+                        $thumbnail_url = get_the_post_thumbnail_url( get_the_ID(), 'post-thumbnail' );
+                        $image_url = $thumbnail_url ? $thumbnail_url : wc_placeholder_img_src();
+
+                        echo '<div class="mainly-wd">';
+                        echo '<div class="mainly-bx">';
+                        echo '<img src="' . esc_url($image_url) . '" />';
+                        echo '<div class="mainly-cnt">';
+                        echo '<h4>' . get_the_title() . '</h4>';
+                        echo '<p>Θερμίδες μερίδας: <strong>'.$kcal_val.'g</strong></p>';
+
+                        if ( $menu_type === 'own' && $product->is_type('simple') ) {
+                            echo '<a class="product-add-to-cart" href="#" 
+                                    data-quantity="1" 
+                                    data-product_id="' . esc_attr($product->get_id()) . '" 
+                                    data-product_sku="' . esc_attr($product->get_sku()) . '" 
+                                     rel="nofollow">' . esc_html__('Προσθήκη στο καλάθι', 'woocommerce') . '</a>';
+                        }
+
+                        echo '</div>'; // mainly-cnt
+                        echo '</div>'; // mainly-bx
+                        echo '</div>'; // mainly-wd
+                    }
+                    wp_reset_postdata();
+                }
+
+                echo '</div>'; // mainly-main
+            }
+        }
+
+        echo '</div>'; // tab__content-act
+        echo '</div>'; // tab-act
+        $counter++;
+    }
+
+    echo '</div>'; // accordion
+
+   $kcal_total = get_category_products_total_price_by_taxonomy($program,$program_menu,$menu_type);
+        echo '</div>';
+        echo '<div class="total-m woopm-bottom-add-to-cart">';
+        echo '<h3 class="frm-title">κόστος: '.$kcal_total['total_price'].'</h3>';
+        $content = ob_get_clean();
+        wp_send_json_success( array( 'content' => $content, 'kcal_total' => $kcal_total ) );
+}
+
+
+    public function woopm_add_to_cart_product() {
+        if ( ! check_ajax_referer( 'woopm_nonce', 'security', false ) ) {
+            wp_send_json_error( 'Invalid nonce provided' );
+            exit;
+        }
+
+        $zipcode = isset( $_POST['zipcode'] ) ? sanitize_text_field( $_POST['zipcode'] ) : '';
+        $current_program = isset( $_POST['current_program'] ) ? sanitize_text_field( $_POST['current_program'] ) : '';
+        $current_program_menu = isset( $_POST['current_program_menu'] ) ? sanitize_text_field( $_POST['current_program_menu'] ) : '';
+        $current_available_menu = isset( $_POST['current_available_menu'] ) ? sanitize_text_field( $_POST['current_available_menu'] ) : '';
+        $current_day = isset( $_POST['current_day'] ) ? intval( $_POST['current_day'] ) : '';
+        $current_allergens = isset( $_POST['current_allergens'] ) ? sanitize_text_field( $_POST['current_allergens'] ) : '';
+        $current_allergens_other = isset( $_POST['current_allergens_other'] ) ? sanitize_text_field( $_POST['current_allergens_other'] ) : '';
+
+        if($current_program == 'monthly_menu'){
+            $current_program_val = 'Μηνιαίο';
+        }else{
+            $current_program_val = 'Εβδομαδιαίο';
+        }
+
+        if($current_program_menu == 'ready'){
+            $current_program_menu_val = 'Έτοιμα μενού';
+        }else{
+            $current_program_menu_val = 'Φτιάξε το δικό σου μενού';
+        }
+
+        if($current_day == -1){
+            $current_day_val = 'Πλήρες μενού';
+        }else{
+            $current_day_val = $current_day;
+        }
+
+        if($current_allergens == 'nuts'){
+            $current_allergens_value = 'Ξηροί καρποί';
+        }elseif($current_allergens == 'fishseafood'){
+            $current_allergens_value = 'Ψάρι / Θαλασσινά';
+        }elseif($current_allergens == 'dairyproducts'){
+            $current_allergens_value = 'Γαλακτοκομικά';
+        }elseif($current_allergens == 'egg'){
+            $current_allergens_value = 'Αυγό';
+        }elseif($current_allergens == 'redmeat'){
+            $current_allergens_value = 'Κόκκινο κρέας';
+        }else{
+            $current_allergens_value = $current_allergens_other;
+        }
+        $current_available_menu_val = get_term_by( 'id', $current_available_menu, $current_program);
+
+        $cart_menu_data = array(
+            'ταχυδρομικός κώδικας' => $zipcode,
+            'Πρόγραμμα' => $current_program_val,
+            'Μενού' => $current_program_menu_val,
+            'Διαθέσιμα μενού' => $current_available_menu_val->name,
+            'Διαθέσιμα μενού ημέρας' => $current_day_val,
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => $current_allergens_value,
+        );
+        // echo $current_allergens; die;
+        if($current_program_menu == 'own' && !empty($current_allergens)){
+            
+            $existing_cart_menu_data = WC()->session->get('cart_menu_data');
+    
+            if(!empty($existing_cart_menu_data)){
+                $existing_cart_menu_data['Αλλεργιογόνα & ιδιαίτερες προτιμήσεις'] = $current_allergens_value;
+                WC()->session->set('cart_menu_data', $existing_cart_menu_data);
+                wp_send_json_success( array(
+                    'content' => $added_products, 
+                ) );
+
+            }else{
+                wp_send_json_error( 'Δεν έχετε προϊόντα στο καλάθι σας. Προσθέστε μερικά.' );
+            }
+        }
+
+        $term = get_term($current_available_menu, $current_program);
+        $products = [];
+
+        if (!is_wp_error($term) && !empty($term)) {
+            $productids = get_term_meta($current_available_menu,'product', true);
+        }else{
+            wp_send_json_error( 'No products found for the selected criteria' );
+        }
+       
+        if(!empty($productids)){
+
+            foreach($productids as $product_id){
+                $quantity = 1;
+                $added_to_cart = WC()->cart->add_to_cart($product_id, $quantity);
+                if ($added_to_cart) {
+                    
+                    $added_products[] = array(
+                        'product_id' => $product_id,
+                        'product_name' => get_the_title(),
+                        'product_url' => get_permalink(),
+                    );
+                }
+            }
+
+            WC()->session->set( 'cart_menu_data', null );
+            WC()->session->set('cart_menu_data', $cart_menu_data);
+
+            wp_send_json_success( array(
+                'content' => $added_products, 
+            ) );
+        }else{
+            wp_send_json_error( 'No products found for the selected criteria' );
+        }
+    }   
+
+    public function woopm_add_to_cart_single_product(){
+         if ( ! check_ajax_referer( 'woopm_nonce', 'security', false ) ) {
+            wp_send_json_error( 'Invalid nonce provided' );
+            exit;
+        }
+        $product_id = isset( $_POST['product_id'] ) ? intval( $_POST['product_id'] ) : 0;
+        $zipcode = isset( $_POST['zipcode'] ) ? sanitize_text_field( $_POST['zipcode'] ) : '';
+        $current_program = isset( $_POST['current_program'] ) ? sanitize_text_field( $_POST['current_program'] ) : '';
+        $current_program_menu = isset( $_POST['current_program_menu'] ) ? sanitize_text_field( $_POST['current_program_menu'] ) : '';
+        $current_available_menu = isset( $_POST['current_available_menu'] ) ? sanitize_text_field( $_POST['current_available_menu'] ) : '';
+        $current_day = isset( $_POST['current_day'] ) ? intval( $_POST['current_day'] ) : '';
+        $current_allergens = isset( $_POST['current_allergens'] ) ? sanitize_text_field( $_POST['current_allergens'] ) : '';
+        $current_allergens_other = isset( $_POST['current_allergens_other'] ) ? sanitize_text_field( $_POST['current_allergens_other'] ) : '';
+
+        if($current_program == 'monthly_menu'){
+            $current_program_val = 'Μηνιαίο';
+        }else{
+            $current_program_val = 'Εβδομαδιαίο';
+        }
+
+        if($current_program_menu == 'ready'){
+            $current_program_menu_val = 'Έτοιμα μενού';
+        }else{
+            $current_program_menu_val = 'Φτιάξε το δικό σου μενού';
+        }
+       
+        if($current_day == -1){
+            $current_day_val = 'Πλήρες μενού';
+        }else{
+            $current_day_val = $current_day;
+        }
+
+        if($current_allergens == 'nuts'){
+            $current_allergens_value = 'Ξηροί καρποί';
+        }elseif($current_allergens == 'fishseafood'){
+            $current_allergens_value = 'Ψάρι / Θαλασσινά';
+        }elseif($current_allergens == 'dairyproducts'){
+            $current_allergens_value = 'Γαλακτοκομικά';
+        }elseif($current_allergens == 'egg'){
+            $current_allergens_value = 'Αυγό';
+        }elseif($current_allergens == 'redmeat'){
+            $current_allergens_value = 'Κόκκινο κρέας';
+        }else{
+            $current_allergens_value = $current_allergens_other;
+        }
+
+        $current_available_menu_val = get_term_by( 'id', $current_available_menu, $current_program);
+
+        $cart_menu_data = array(
+            'ταχυδρομικός κώδικας' => $zipcode,
+            'Πρόγραμμα' => $current_program_val,
+            'Μενού' => $current_program_menu_val,
+            'Διαθέσιμα μενού' => $current_available_menu_val->name,
+            'Διαθέσιμα μενού ημέρας' => $current_day_val,
+            'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => $current_allergens_value,
+        );
+
+        $product = wc_get_product($product_id);
+
+        if($product){
+            $quantity = 1;
+
+            // Add custom meta data to the cart
+
+            $added_to_cart = WC()->cart->add_to_cart($product_id, $quantity);
+
+            if( $added_to_cart ){
+                WC()->session->set( 'cart_menu_data', null );
+                WC()->session->set('cart_menu_data', $cart_menu_data);
+
+                wp_send_json_success( array(
+                    'message' => 'Product successfully added to the cart.',
+                    'cart_count' => WC()->cart->get_cart_contents_count() // optional: cart count after adding
+                ));
+            }else{
+                wp_send_json_error( 'Failed to add product to the cart.' );
+            }
+        } else{
+            wp_send_json_error( 'Invalid product ID.' );
+        }
+    }
+
+    public function woopm_modify_cart_item_prices($cart) {
+        if (is_admin() && !defined('DOING_AJAX')) {
+            return;
+        }
+
+        if (did_action('woocommerce_before_calculate_totals') >= 2) {
+            return;
+        }
+
+        // Retrieve the custom session data (cart menu data)
+        $cart_menu_data = WC()->session->get('cart_menu_data');
+        
+        if (!empty($cart_menu_data)) {
+            foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
+                $product_id = $cart_item['product_id'];
+
+                // Check if the product ID exists and modify its price
+                if (isset($cart_item['data'])) {
+                    $product = $cart_item['data'];
+                    // Set new price based on the selected program menu
+                    if ( $cart_menu_data['Πρόγραμμα'] === 'Μηνιαίο'&& $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού' ) {
+                        $new_price = get_field('μηνιαίο', $product_id);
+                    } elseif ( $cart_menu_data['Πρόγραμμα'] === 'Εβδομαδιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού' ) {
+                        $new_price = get_field('εβδομαδιαίο', $product_id);
+                    } else {
+                        $new_price = $product->get_price();
+                    }
+
+                    if (!empty($new_price)) {
+                        $product->set_price($new_price); // Change price in cart
+                    }
+                }
+            }
+        }
+    }
+
+    public function woopm_display_cart_menu_data_on_checkout(){
+        $cart_menu_data = WC()->session->get('cart_menu_data');
+        if (!empty($cart_menu_data)) {
+            echo '<h3>' . __('Blue Menu', 'woocommerce') . '</h3>';
+            echo '<ul>';
+            
+            foreach ($cart_menu_data as $key => $value) {
+                if (!empty($value)) {
+                    echo '<li><strong>' . ucfirst(str_replace('_', ' ', $key)) . ': </strong>' . esc_html($value) . '</li>';
+                }
+            }
+            
+            echo '</ul>';
+        }
+    }
+
+    public function woopm_clear_cart_session_if_empty() {
+        if (WC()->cart->is_empty()) {
+            WC()->session->set('cart_menu_data', null); 
+        }
+    }
+
+    public function woopm_apply_custom_price_in_cart($product_price, $cart_item, $cart_item_key) {
+        // Retrieve the custom menu data and product ID
+        $product = $cart_item['data'];
+        $product_id = $cart_item['product_id'];
+
+        $cart_menu_data = WC()->session->get('cart_menu_data');
+
+        // Initialize new price
+        $new_price = $product->get_price();
+
+        if (!empty($cart_menu_data)) {
+            if ( $cart_menu_data['Πρόγραμμα'] === 'Μηνιαίο'&& $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού' ) {
+                $new_price = get_field('μηνιαίο', $product_id);
+            } elseif ( $cart_menu_data['Πρόγραμμα'] === 'Εβδομαδιαίο' && $cart_menu_data['Μενού'] === 'Φτιάξε το δικό σου μενού' ) {
+                $new_price = get_field('εβδομαδιαίο', $product_id);
+            } else {
+                $new_price = $product->get_price();
+            }
+        }
+
+        $new_price = floatval(str_replace(',', '.', $new_price));
+
+        return wc_price($new_price);  // Return custom formatted price
+    }
+
+    public function woopm_apply_custom_price_to_mini_cart() {
+        // Force the recalculation of prices in the mini cart
+        WC()->cart->calculate_totals();
+    }  
+
+
+
+    
+    public function save_cart_menu_data_to_order($order, $data) {
+        if (WC()->session->__isset('cart_menu_data')) {
+            $cart_menu_data = WC()->session->get('cart_menu_data');
+            if (!empty($cart_menu_data) && is_array($cart_menu_data)) {
+                foreach ($cart_menu_data as $key => $value) {
+                    $order->update_meta_data($key, $value);
+                }
+            }
+        }
+    }
+
+
+
+
+// 1. Display custom fields on the checkout page
+//add_action('woocommerce_after_order_notes', 'woopm_custom_checkout_fields');
+public function woopm_custom_checkout_fields($checkout) {
+    echo '<div id="woopm_custom_checkout_fields"><h3>' . __('Blue Menu Details') . '</h3>';
+
+    $fields = [
+        'ταχυδρομικός κώδικας' => 'Ταχυδρομικός Κώδικας',
+        'Πρόγραμμα' => 'Πρόγραμμα',
+        'Μενού' => 'Μενού',
+        'Διαθέσιμα μενού' => 'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας' => 'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις' => 'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    foreach ($fields as $key => $label) {
+        $type = ($key === 'Διαθέσιμα μενού ημέρας' || $key === 'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις') ? 'textarea' : 'text';
+
+        woocommerce_form_field($key, [
+            'type'     => $type,
+            'class'    => ['form-row-wide'],
+            'label'    => __($label),
+            'required' => false,
+        ], $checkout->get_value($key));
+    }
+
+    echo '</div>';
+}
+
+
+
+// 2. Save the custom fields to the order
+// add_action('woocommerce_checkout_update_order_meta', 'woopm_save_checkout_fields');
+public function woopm_save_checkout_fields($order_id) {
+    $keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    foreach ($keys as $key) {
+        if (isset($_POST[$key])) {
+            $value = is_array($_POST[$key]) ? implode(', ', $_POST[$key]) : $_POST[$key];
+            update_post_meta($order_id, $key, sanitize_text_field($value));
+        }
+    }
+}
+
+
+
+// 3. Show the custom fields in the admin order details
+// add_action('woocommerce_admin_order_data_after_order_details', 'woopm_display_custom_order_meta_admin');
+Public function woopm_display_custom_order_meta_admin($order) {
+    $keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    echo '<div class="order_data_column"><h3>' . __('Blue Menu Details') . '</h3>';
+    foreach ($keys as $key) {
+        $value = $order->get_meta($key);
+        if (!empty($value)) {
+            echo '<p><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</p>';
+        }
+    }
+    echo '</div>';
+}
+
+
+
+
+
+}
+ add_action('woocommerce_thankyou', 'woopm_show_blue_menu_on_thankyou', 20);
+
+ function woopm_show_blue_menu_on_thankyou($order_id) {
+    $order = wc_get_order($order_id);
+
+    $menu_keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    echo '<h2>Blue Menu</h2><ul>';
+    foreach ($menu_keys as $key) {
+        $value = $order->get_meta($key);
+        if (!empty($value)) {
+            echo '<li><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</li>';
+        }
+    }
+    echo '</ul>';
+}
+
+
+ add_action('woocommerce_email_order_details', 'woopm_add_cart_menu_data_to_email', 30, 4);
+
+ function woopm_add_cart_menu_data_to_email($order, $sent_to_admin, $plain_text, $email)  {
+    // Define keys to show in email
+    $menu_keys = [
+        'ταχυδρομικός κώδικας',
+        'Πρόγραμμα',
+        'Μενού',
+        'Διαθέσιμα μενού',
+        'Διαθέσιμα μενού ημέρας',
+        'Αλλεργιογόνα & ιδιαίτερες προτιμήσεις',
+    ];
+
+    // Gather the output
+    if (!$plain_text) {
+        echo '<h2>Blue Menu</h2><ul>';
+        foreach ($menu_keys as $key) {
+            $value = $order->get_meta($key);
+            if (!empty($value)) {
+                echo '<li><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</li>';
+            }
+        }
+        echo '</ul>';
+    } else {
+        // For plain text emails
+        echo "Blue Menu\n";
+        foreach ($menu_keys as $key) {
+            $value = $order->get_meta($key);
+            if (!empty($value)) {
+                echo $key . ': ' . $value . "\n";
+            }
+        }
+        echo "\n";
+    }
+}
+

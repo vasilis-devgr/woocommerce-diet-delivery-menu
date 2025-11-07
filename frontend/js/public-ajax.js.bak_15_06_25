@@ -1,0 +1,521 @@
+jQuery(document).ready(function ($) {
+  // on page load section opicity
+  $(
+    ".woopm-choose-program-section, .woopm-select-menu-section, .woopm-available-menu-section, .woopm-add-to-cart, .woopm-products, .woopm-allergens-section, .woopm-menu-submit, .woopm-add-to-cart-button"
+  ).css({
+    opacity: "0.5",
+    cursor: "not-allowed",
+  });
+
+  $(
+    ".woopm-choose-program, .woopm-select-menu, .kcal-category-select, .kcal-section-days, .woopm-add-to-cart-button, .woopm-add-to-cart-button"
+  ).css({
+    "pointer-events": "none",
+  });
+
+  // Search Zip Code matched start
+  let debounceTimer;
+  $(document).on("keyup", "#menu-zipcode", function (e) {
+    let zipcode = $(this).val();
+
+    clearTimeout(debounceTimer);
+
+    if (zipcode.length === 5 || zipcode.length > 5) {
+      debounceTimer = setTimeout(function () {
+        $.ajax({
+          url: woopm_ajax_object.ajax_url,
+          type: "POST",
+          data: {
+            action: "check_shipping_zipcode",
+            zipcode: zipcode,
+            security: woopm_ajax_object.woopm_nonce,
+          },
+          success: function (response) {
+            if (response.success) {
+              $(".woopm-choose-program").prop("disabled", false);
+              $(".zipcode-msg").html("😊 Μπορείτε να παραγγείλετε");
+              $(".woopm-choose-program-section").css({
+                opacity: "1.0",
+                cursor: "unset",
+                "pointer-events": "unset",
+              });
+              $(".woopm-choose-program-section .form__radio-label").css({
+                "pointer-events": "unset",
+                cursor: "pointer",
+              });
+            } else {
+              $(".zipcode-msg").html(
+                "😞 Δυστυχώς, δεν εξυπηρετούμε ακόμα την περιοχή σας"
+              );
+              $(".woopm-choose-program").prop("disabled", true);
+
+              $(".woopm-choose-program-section").css({
+                opacity: "0.5",
+                "pointer-events": "not-allowed",
+              });
+
+              $(".woopm-choose-program-section").css({
+                "pointer-events": "none",
+              });
+            }
+          },
+        });
+      }, 500);
+    }
+  });
+  // Search Zip Code matched end
+
+  // Choose program start
+  $('input[type="radio"].woopm-choose-program').change(function () {
+    if ($('input[type="radio"].woopm-choose-program:checked').length) {
+      let program = $(this).val();
+      $.ajax({
+        url: woopm_ajax_object.ajax_url,
+        type: "POST",
+        data: {
+          action: "get_available_menu_by_program",
+          program: program,
+          security: woopm_ajax_object.woopm_nonce,
+        },
+        success: function (response) {
+          $(".woopm-select-menu").prop("disabled", false);
+          $(".woopm-select-menu-section").css({
+            opacity: "1.0",
+            cursor: "unset",
+            "pointer-events": "unset",
+          });
+          $(".woopm-select-menu-section .form__radio-label").css({
+            "pointer-events": "unset",
+            cursor: "pointer",
+          });
+          $(".kcal-category-select").html(response.data.content);
+
+          if ($('input[type="radio"].woopm-select-menu:checked').length) {
+            setTimeout(function () {
+              let menuType = $(
+                'input[type="radio"].woopm-select-menu:checked'
+              ).val();
+              let programMenu = $(".kcal-category-select option:first").val();
+              $.ajax({
+                url: woopm_ajax_object.ajax_url,
+                type: "POST",
+                data: {
+                  action: "get_product_by_program_type",
+                  program: program,
+                  program_menu: programMenu,
+                  menu_type: menuType,
+                  security: woopm_ajax_object.woopm_nonce,
+                },
+                success: function (response) {
+                  $(".kcal-category-select").prop("disabled", false);
+                  $(".kcal-select-days").prop("disabled", false);
+
+                  if (menuType === "own") {
+                    $(".kcal-section").hide();
+                  } else {
+                    $(".kcal-section").show();
+                  }
+
+                  $(
+                    ".woopm-available-menu-section, .woopm-add-to-cart, .woopm-products, .woopm-allergens-section, .woopm-menu-submit, .kcal-section-days"
+                  ).css({
+                    opacity: "1.0",
+                    cursor: "unset",
+                    "pointer-events": "unset",
+                  });
+
+                  $(
+                    ".woopm-add-to-cart-button, .woopm-menu-submit, .kcal-category-select, .kcal-select-days, .woopm-allergens-section .form__radio-label"
+                  ).css({
+                    opacity: "1.0",
+                    "pointer-events": "unset",
+                    cursor: "pointer",
+                  });
+                  $(".kcal-category-select").prop("disabled", false);
+                  if (menuType == "own") {
+                    $(".woopm-add-to-cart").hide();
+                  } else {
+                    $(".woopm-add-to-cart").show();
+                  }
+                  $(".woopm-products").html(response.data.content);
+                  $(".woopm-product-prices").html(
+                    `Κόστος: ` + response.data.kcal_total.total_price
+                  );
+				  
+				  $('.woopm-product-content').remove();
+					if( response.data.description ){
+						$('.woopm-products').after('<div class="mns-box woopm-product-content">'+response.data.description+'</div>');
+					}
+                  // Initialize accordion after content is loaded
+                },
+              });
+            }, 500);
+          }
+        },
+      });
+    }
+  });
+  // Choose program end
+
+  // Select menu start
+  $('input[type="radio"].woopm-select-menu').change(function () {
+    if ($('input[type="radio"].woopm-select-menu:checked').length) {
+      let menuType = $(this).val();
+      let program = $('input[type="radio"].woopm-choose-program:checked').val();
+      let programMenu = $(".kcal-category-select").val();
+      let availableDay = $(".kcal-select-days").val();
+      $.ajax({
+        url: woopm_ajax_object.ajax_url,
+        type: "POST",
+        data: {
+          action: "get_product_by_program_type",
+          program: program,
+          program_menu: programMenu,
+          menu_type: menuType,
+          available_day: availableDay,
+          security: woopm_ajax_object.woopm_nonce,
+        },
+        success: function (response) {
+          $(".kcal-category-select").prop("disabled", false);
+          $(".kcal-select-days").prop("disabled", false);
+
+          if (menuType === "own") {
+            $(".kcal-section").hide();
+          } else {
+            $(".kcal-section").show();
+          }
+
+          $(
+            ".woopm-available-menu-section, .woopm-add-to-cart, .woopm-products, .woopm-allergens-section, .woopm-menu-submit, .kcal-section-days"
+          ).css({
+            opacity: "1.0",
+            cursor: "unset",
+            "pointer-events": "unset",
+          });
+
+          $(
+            ".woopm-add-to-cart-button, .woopm-menu-submit, .kcal-category-select, .kcal-select-days, .woopm-allergens-section .form__radio-label"
+          ).css({
+            opacity: "1.0",
+            "pointer-events": "unset",
+            cursor: "pointer",
+          });
+          $(".kcal-category-select").prop("disabled", false);
+          if (menuType == "own") {
+            $(".woopm-add-to-cart").hide();
+          } else {
+            $(".woopm-add-to-cart").show();
+          }
+          $(".woopm-products").html(response.data.content);
+          $(".woopm-product-prices").html(
+            `Κόστος: ` + response.data.kcal_total.total_price
+          );
+		  
+		  $('.woopm-product-content').remove();
+			if( response.data.description ){
+				$('.woopm-products').after('<div class="mns-box woopm-product-content">'+response.data.description+'</div>');
+			}
+          // Initialize accordion after content is loaded
+        },
+      });
+    }
+  });
+  // Select menu end
+
+  // available menus change start
+  $(".kcal-category-select").on("change", function () {
+    let program = $('input[type="radio"].woopm-choose-program:checked').val();
+    let menuType = $('input[type="radio"].woopm-select-menu:checked').val();
+    let programMenu = $(this).val();
+    let availableDay = $(".kcal-select-days").val();
+    $.ajax({
+      url: woopm_ajax_object.ajax_url,
+      type: "POST",
+      data: {
+        action: "get_product_by_program_type",
+        program: program,
+        program_menu: programMenu,
+        menu_type: menuType,
+        available_day: availableDay,
+        security: woopm_ajax_object.woopm_nonce,
+      },
+      success: function (response) {
+        $(".woopm-products").html(response.data.content);
+        $(".woopm-product-prices").html(
+          `Κόστος: ` + response.data.kcal_total.total_price
+        );
+		$('.woopm-product-content').remove();
+		if( response.data.description ){
+			$('.woopm-products').after('<div class="mns-box woopm-product-content">'+response.data.description+'</div>');
+		}
+        // Initialize accordion after content is loaded
+      },
+    });
+  });
+  // available menus change start
+  
+  // Handle meal time selection change
+  $(document).on('change', '.kcal-select-days', function() {
+    let availableDay = $(this).val();
+    let menuType = $('input[type="radio"].woopm-select-menu:checked').val();
+    
+    // Only reload products if "make your own menu" is selected
+    if (menuType === 'own' || menuType === 'monthly_menu') {
+      let program = $('input[type="radio"].woopm-choose-program:checked').val();
+      let programMenu = $(".kcal-category-select").val();
+      
+      $.ajax({
+        url: woopm_ajax_object.ajax_url,
+        type: "POST",
+        data: {
+          action: "get_product_by_program_type",
+          program: program,
+          program_menu: programMenu,
+          menu_type: menuType,
+          available_day: availableDay,
+          security: woopm_ajax_object.woopm_nonce,
+        },
+        success: function (response) {
+          $(".woopm-products").html(response.data.content);
+          // Don't update price for own menu as it's calculated per product
+        },
+      });
+    }
+  });
+
+  // add to cart start
+  $(document).on("click", ".woopm-add-to-cart-button", function (e) {
+    e.preventDefault();
+    let $button = $(this);
+
+    let zipcode = $("#menu-zipcode").val();
+    let currentProgram = $(
+      'input[type="radio"].woopm-choose-program:checked'
+    ).val();
+    let currentProgramMenu = $(
+      'input[type="radio"].woopm-select-menu:checked'
+    ).val();
+    let currentAvailableMenu = $(".kcal-category-select").val();
+    let currentDay = $(".kcal-select-days").val();
+    // Get selected allergens (checkboxes)
+    let selectedAllergens = [];
+    $('input[type="checkbox"].woopm-select-allergens:checked').each(function() {
+      if ($(this).val() !== 'none') {
+        selectedAllergens.push($(this).val());
+      }
+    });
+    let currentAllergens = selectedAllergens.length > 0 ? selectedAllergens.join(',') : 'none';
+    let currentAllergensOther = $(".woopm-select-allergens-other").val();
+
+    let totalPrice = $('#total_price').val();
+
+    /*if (!currentAllergens) { 
+            alert("Αλλεργιογόνα & ιδιαίτερες προτιμήσεις υποχρεούμαι"); 
+            return; 
+        }
+
+        if (currentAllergens.toLowerCase() === "other" && !currentAllergensOther) {
+            alert("Αλλεργιογόνα & ιδιαίτερες προτιμήσεις υποχρεούμαι"); 
+            return; 
+        } */
+
+    $button.prop("disabled", true);
+    $button.css({
+      "pointer-events": "none",
+    });
+    $button.html('<i class="fa fa-spinner fa-spin"></i> Φόρτωση...');
+
+    $.ajax({
+      url: woopm_ajax_object.ajax_url,
+      type: "POST",
+      data: {
+        action: "add_to_cart_product",
+        zipcode: zipcode,
+        current_program: currentProgram,
+        current_program_menu: currentProgramMenu,
+        current_available_menu: currentAvailableMenu,
+        current_day: currentDay,
+        current_allergens: currentAllergens,
+        current_allergens_other: currentAllergensOther,
+        total_price: totalPrice,
+        security: woopm_ajax_object.woopm_nonce,
+      },
+      success: function (response) {
+        if (response.success) {
+          Swal.fire({
+            title: "Προστέθηκε",
+            text: "Το προϊόν είναι στο καλάθι σου",
+            icon: "success",
+          }).then(() => {
+            location.reload();
+          });
+        } else {
+          Swal.fire({
+            title: "Δεν προστέθηκε",
+            text: response.data,
+            icon: "error",
+            confirmButtonText: "Προσπαθήστε αργότερα",
+          });
+        }
+      },
+      error: function () {
+        $button.prop("disabled", false);
+        $button.css({
+          "pointer-events": "unset",
+        });
+        $button.html("Προσθήκη στο καλάθι");
+      },
+      complete: function () {
+        $button.prop("disabled", false);
+        $button.css({
+          "pointer-events": "unset",
+        });
+        $button.html("Προσθήκη στο καλάθι");
+      },
+    });
+  });
+  // add to cart end
+
+  // add to cart single start
+  $(document).on("click", ".product-add-to-cart", function (e) {
+    e.preventDefault();
+    let $button = $(this);
+    $button.prop("disabled", true);
+    $button.css({
+      "pointer-events": "none",
+    });
+    $button.html('<i class="fa fa-spinner fa-spin"></i> Φόρτωση...');
+
+    let productId = $(this).attr("data-product_id");
+    let zipcode = $("#menu-zipcode").val();
+    let currentProgram = $(
+      'input[type="radio"].woopm-choose-program:checked'
+    ).val();
+    let currentProgramMenu = $(
+      'input[type="radio"].woopm-select-menu:checked'
+    ).val();
+    let currentAvailableMenu = $(".kcal-category-select").val();
+    let currentDay = $(".kcal-select-days").val();
+    // Get selected allergens (checkboxes)
+    let selectedAllergens = [];
+    $('input[type="checkbox"].woopm-select-allergens:checked').each(function() {
+      if ($(this).val() !== 'none') {
+        selectedAllergens.push($(this).val());
+      }
+    });
+    let currentAllergens = selectedAllergens.length > 0 ? selectedAllergens.join(',') : 'none';
+    let currentAllergensOther = $(".woopm-select-allergens-other").val();
+    
+    // Get schedule data from button attributes
+    let weekId = $(this).attr("data-week") || "";
+    let weekName = $(this).attr("data-week-name") || "";
+    let dayId = $(this).attr("data-day") || "";
+    let dayName = $(this).attr("data-day-name") || "";
+    let mealId = $(this).attr("data-meal") || "";
+    let mealName = $(this).attr("data-meal-name") || "";
+
+    $.ajax({
+      url: woopm_ajax_object.ajax_url,
+      type: "POST",
+      data: {
+        action: "add_to_cart_single_product",
+        product_id: productId,
+        zipcode: zipcode,
+        current_program: currentProgram,
+        current_program_menu: currentProgramMenu,
+        current_available_menu: currentAvailableMenu,
+        current_day: currentDay,
+        current_allergens: currentAllergens,
+        current_allergens_other: currentAllergensOther,
+        week_id: weekId,
+        week_name: weekName,
+        day_id: dayId,
+        day_name: dayName,
+        meal_id: mealId,
+        meal_name: mealName,
+        security: woopm_ajax_object.woopm_nonce,
+      },
+      success: function (response) {
+        if (response.success) {
+          let message = response.data.product_name + " added to cart!";
+          if (response.data.schedule_info) {
+            message += "\n" + response.data.schedule_info;
+          }
+          if (response.data.custom_price) {
+            message += "\nPrice: " + response.data.custom_price;
+          }
+          
+          // Update cart count in header
+          if (response.data.cart_count) {
+            $('.cart-contents-count').text(response.data.cart_count);
+          }
+          
+          // Update mini cart fragments
+          if (response.data.fragments) {
+            $.each(response.data.fragments, function(key, value) {
+              $(key).replaceWith(value);
+            });
+          }
+          
+          // Trigger WooCommerce events
+          $(document.body).trigger('wc_fragment_refresh');
+          $(document.body).trigger('added_to_cart', [response.data.fragments, response.data.cart_hash]);
+          
+          Swal.fire({
+            title: "Success!",
+            html: message.replace(/\n/g, '<br>'),
+            icon: "success",
+            timer: 2500,
+            showConfirmButton: false
+          });
+        } else {
+          Swal.fire({
+            title: "Error",
+            text: response.data,
+            icon: "error",
+            confirmButtonText: "Try Again",
+          });
+        }
+      },
+      error: function () {
+        $button.prop("disabled", false);
+        $button.css({
+          "pointer-events": "unset",
+        });
+        $button.html("Προσθήκη στο καλάθι");
+      },
+      complete: function () {
+        $button.prop("disabled", false);
+        $button.css({
+          "pointer-events": "unset",
+        });
+        $button.html("Προσθήκη στο καλάθι");
+      },
+    });
+  });
+  // add to cart single end
+
+  // Allergens start
+  $(document).on('change', 'input[type="checkbox"].woopm-select-allergens', function () {
+    let $this = $(this);
+    let value = $this.val();
+    
+    // Handle "none" checkbox - uncheck others if none is selected
+    if (value === 'none' && $this.is(':checked')) {
+      $('input[type="checkbox"].woopm-select-allergens').not($this).prop('checked', false);
+      $(".woopm-select-allergens-other-section").hide();
+    } else if ($this.is(':checked')) {
+      // Uncheck "none" if any other option is selected
+      $('#s0').prop('checked', false);
+    }
+    
+    // Show/hide other text field
+    if ($('#s6').is(':checked')) {
+      $(".woopm-select-allergens-other-section").show();
+    } else {
+      $(".woopm-select-allergens-other-section").hide();
+      $(".woopm-select-allergens-other").val('');
+    }
+  });
+  // Allergens end
+});

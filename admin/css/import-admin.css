@@ -1,0 +1,444 @@
+/**
+ * Admin CSS for Menu Import functionality
+ */
+
+/* Import Steps */
+.woopm-import-steps {
+    display: flex;
+    justify-content: space-between;
+    margin: 30px 0;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.woopm-import-steps .step {
+    flex: 1;
+    padding: 20px;
+    text-align: center;
+    border-right: 1px solid #ccc;
+    background: #f9f9f9;
+    position: relative;
+}
+
+.woopm-import-steps .step:last-child {
+    border-right: none;
+}
+
+.woopm-import-steps .step.active {
+    background: #fff;
+    box-shadow: inset 0 -3px 0 #0073aa;
+}
+
+.woopm-import-steps .step-number {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    line-height: 30px;
+    border-radius: 50%;
+    background: #ddd;
+    color: #666;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.woopm-import-steps .step.active .step-number {
+    background: #0073aa;
+    color: #fff;
+}
+
+.woopm-import-steps .step-title {
+    display: block;
+    font-size: 14px;
+    color: #666;
+}
+
+.woopm-import-steps .step.active .step-title {
+    color: #23282d;
+    font-weight: bold;
+}
+
+/* Import Content */
+.woopm-import-content {
+    background: #fff;
+    padding: 30px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-top: 20px;
+}
+
+/* Upload Form */
+.woopm-upload-form {
+    margin: 30px 0;
+}
+
+.woopm-upload-form .form-table th {
+    width: 200px;
+}
+
+/* Help Section */
+.woopm-help-section {
+    margin-top: 40px;
+    padding: 20px;
+    background: #f1f1f1;
+    border-left: 4px solid #0073aa;
+}
+
+.woopm-help-section h3 {
+    margin-top: 0;
+}
+
+.woopm-help-section ul {
+    margin-left: 20px;
+}
+
+/* Progress Bar */
+.woopm-progress-bar {
+    width: 100%;
+    height: 20px;
+    background: #f0f0f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.woopm-progress-bar-fill {
+    height: 100%;
+    background: #0073aa;
+    width: 0;
+    transition: width 0.3s ease;
+}
+
+.woopm-progress-details {
+    margin-top: 10px;
+    color: #666;
+    font-size: 13px;
+}
+
+/* Validation Results */
+.woopm-validation-summary {
+    background: #f9f9f9;
+    padding: 20px;
+    border: 1px solid #ddd;
+    margin-bottom: 20px;
+}
+
+.woopm-validation-summary h3 {
+    margin-top: 0;
+}
+
+.woopm-validation-summary ul {
+    margin: 10px 0 0 20px;
+}
+
+/* Scrollable Lists */
+.woopm-scrollable {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    background: #fff;
+}
+
+/* Actions */
+.woopm-actions {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+}
+
+.woopm-actions .button {
+    margin-right: 10px;
+}
+
+/* Import Settings */
+#import-settings {
+    background: #f9f9f9;
+    padding: 20px;
+    border: 1px solid #ddd;
+    margin: 20px 0;
+}
+
+#import-settings h3 {
+    margin-top: 0;
+}
+
+#import-settings label {
+    display: block;
+    margin: 10px 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+#import-settings input[type="checkbox"] {
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+#import-settings .description {
+    display: block;
+    margin-left: 25px;
+    color: #666;
+    font-size: 13px;
+    font-style: italic;
+}
+
+#import-settings input[type="checkbox"]:disabled + span {
+    opacity: 0.6;
+}
+
+/* Notices */
+.woopm-import-wrap .notice {
+    margin: 20px 0;
+}
+
+.woopm-import-wrap .notice h3 {
+    margin-top: 0;
+}
+
+.woopm-import-wrap .notice ul {
+    margin: 10px 0 0 20px;
+}
+
+.woopm-import-wrap .notice .error {
+    color: #dc3232;
+}
+
+/* Complete Section */
+.woopm-complete-section {
+    text-align: center;
+    padding: 40px 0;
+}
+
+.woopm-complete-section h2 {
+    color: #46b450;
+    font-size: 28px;
+}
+
+/* Assignments Page */
+.woopm-assignments-wrap .tablenav-pages {
+    margin: 20px 0;
+}
+
+.woopm-assignments-wrap .filter-form {
+    background: #f9f9f9;
+    padding: 15px;
+    border: 1px solid #ddd;
+    margin: 20px 0;
+}
+
+.woopm-assignments-wrap .filter-form input,
+.woopm-assignments-wrap .filter-form select {
+    margin-right: 10px;
+}
+
+.assignment-list {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.assignment-list li {
+    margin: 2px 0;
+    padding: 2px 0;
+    border-bottom: 1px dotted #ddd;
+}
+
+.assignment-list li:last-child {
+    border-bottom: none;
+}
+
+/* Statistics */
+.woopm-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.woopm-stat-box {
+    background: #fff;
+    border: 1px solid #ddd;
+    padding: 20px;
+    text-align: center;
+    border-radius: 4px;
+}
+
+.woopm-stat-box h3 {
+    margin: 0 0 10px 0;
+    color: #666;
+    font-size: 14px;
+    font-weight: normal;
+}
+
+.woopm-stat-number {
+    font-size: 36px;
+    font-weight: bold;
+    color: #0073aa;
+    line-height: 1;
+}
+
+/* Sortable Table Headers */
+.woopm-assignments-wrap table th a {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    padding-right: 20px;
+}
+
+.woopm-assignments-wrap table th a:hover {
+    color: #0073aa;
+}
+
+.woopm-assignments-wrap table th a:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Import Log Viewer */
+.woopm-import-log-viewer {
+    margin-top: 30px;
+    background: #f9f9f9;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.woopm-import-log-viewer h3 {
+    margin-top: 0;
+}
+
+.log-filters {
+    margin: 15px 0;
+}
+
+.log-filters .button {
+    margin-right: 10px;
+}
+
+.woopm-log-container {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 15px;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.woopm-log-container pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.log-entry {
+    display: block;
+    padding: 2px 0;
+    line-height: 1.4;
+}
+
+.log-entry.log-error {
+    color: #dc3232;
+    font-weight: bold;
+}
+
+.log-entry.log-row {
+    color: #0073aa;
+    border-top: 1px solid #eee;
+    margin-top: 5px;
+    padding-top: 5px;
+}
+
+.log-entry.log-product {
+    color: #666;
+    margin-left: 20px;
+}
+
+/* Live Import Log */
+#import-live-log {
+    background: #f9f9f9;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+#import-live-log h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.log-controls {
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.log-controls label {
+    margin: 0;
+}
+
+.woopm-live-log-container {
+    background: #000;
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    padding: 10px;
+    border-radius: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#live-log-content .log-entry {
+    padding: 2px 0;
+    display: block;
+    word-wrap: break-word;
+}
+
+#live-log-content .log-time {
+    color: #999;
+    font-size: 11px;
+}
+
+#live-log-content .log-error {
+    color: #ff6b6b;
+}
+
+#live-log-content .log-success {
+    color: #51cf66;
+}
+
+#live-log-content .log-row {
+    color: #4dabf7;
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid #333;
+}
+
+#live-log-content .log-product {
+    color: #f08c00;
+    padding-left: 20px;
+}
+
+/* Responsive */
+@media screen and (max-width: 782px) {
+    .woopm-import-steps {
+        flex-direction: column;
+    }
+    
+    .woopm-import-steps .step {
+        border-right: none;
+        border-bottom: 1px solid #ccc;
+    }
+    
+    .woopm-import-steps .step:last-child {
+        border-bottom: none;
+    }
+    
+    .woopm-stats-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,22 @@
+/* Menu Assignments Styles */
+.acf-field[data-name="week"] {
+    transition: opacity 0.2s ease;
+}
+
+/* Style the select dropdowns for better UX */
+.acf-field[data-name="menu_type"] select,
+.acf-field[data-name="program_menu"] select,
+.acf-field[data-name="week"] select,
+.acf-field[data-name="day"] select,
+.acf-field[data-name="meal"] select {
+    width: 100%;
+}
+
+/* Add visual indicator for weekly menus */
+.acf-row:has([data-name="menu_type"] select[value="weekly"]) {
+    background-color: #f0f8ff;
+}
+
+.acf-row:has([data-name="menu_type"] select[value="monthly"]) {
+    background-color: #fff8f0;
+}
